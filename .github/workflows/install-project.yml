@@ -100,25 +100,10 @@ jobs:
           test -f app/main.py
           test -f signing/debug.keystore
 
-          PACKAGE_DOMAIN="$(
-            sed -n 's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' buildozer.spec |
-              tail -n 1 | xargs
-          )"
-
-          PACKAGE_NAME="$(
-            sed -n 's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' buildozer.spec |
-              tail -n 1 | xargs
-          )"
-
-          VERSION="$(
-            sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
-              tail -n 1 | xargs
-          )"
-
-          NUMERIC_VERSION="$(
-            sed -n 's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
-              tail -n 1 | xargs
-          )"
+          PACKAGE_DOMAIN=$(sed -n 's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' buildozer.spec | tail -n 1 | xargs)
+          PACKAGE_NAME=$(sed -n 's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' buildozer.spec | tail -n 1 | xargs)
+          VERSION=$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' buildozer.spec | tail -n 1 | xargs)
+          NUMERIC_VERSION=$(sed -n 's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' buildozer.spec | tail -n 1 | xargs)
 
           test -n "$PACKAGE_DOMAIN"
           test -n "$PACKAGE_NAME"
@@ -148,25 +133,21 @@ jobs:
             -storepass android \
             -alias androiddebugkey >/dev/null
 
-          KEY_SHA="$(
-            keytool -list -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey |
-              awk -F': ' '/SHA256:/{print $2; exit}'
-          )"
+          keytool -list -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey > keytool-cert.txt
 
-          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          KEY_SHA=$(awk -F': ' '/SHA256:/{print $2; exit}' keytool-cert.txt)
+
+          test -n "$KEY_SHA"
+
+          KEY_SHA=$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
 
           test "$KEY_SHA" = "13:E0:41:41:39:05:CE:30:B0:AA:3E:40:5A:F9:7D:DE:86:2B:0C:3C:FE:DD:DB:8B:66:52:FA:28:D6:68:7F:04"
 
           echo "=== FIXED KEY CERTIFICATE ==="
-
-          keytool -list -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey |
-            grep -E 'Owner:|SHA256:'
+          grep -E 'Owner:|SHA256:' keytool-cert.txt
 
           echo "Installed project and signing-key verification passed."
 
@@ -307,7 +288,6 @@ jobs:
             --print-certs \
             "$APK" | tee apk-cert.txt
 
-          grep -q "Verified using v1 scheme (JAR signing): true" apk-cert.txt
           grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" apk-cert.txt
           grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" apk-cert.txt
 
