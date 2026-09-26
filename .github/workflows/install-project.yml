@@ -104,14 +104,17 @@ jobs:
             sed -n 's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' buildozer.spec |
               tail -n 1 | xargs
           )"
+
           PACKAGE_NAME="$(
             sed -n 's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' buildozer.spec |
               tail -n 1 | xargs
           )"
+
           VERSION="$(
             sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
               tail -n 1 | xargs
           )"
+
           NUMERIC_VERSION="$(
             sed -n 's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
               tail -n 1 | xargs
@@ -152,10 +155,13 @@ jobs:
               -alias androiddebugkey |
               awk -F': ' '/SHA256:/{print $2; exit}'
           )"
+
           KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+
           test "$KEY_SHA" = "13:E0:41:41:39:05:CE:30:B0:AA:3E:40:5A:F9:7D:DE:86:2B:0C:3C:FE:DD:DB:8B:66:52:FA:28:D6:68:7F:04"
 
           echo "=== FIXED KEY CERTIFICATE ==="
+
           keytool -list -v \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
@@ -171,7 +177,9 @@ jobs:
           cd "$GITHUB_WORKSPACE"
 
           rm -rf .buildozer bin signed
+
           find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+
           find . -type f -name '*.pyc' -delete
           find . -type f -name '*.pyo' -delete
 
@@ -198,10 +206,12 @@ jobs:
             find "$HOME/.buildozer" -type f -name apksigner -perm -111 \
               -print 2>/dev/null | sort -V | tail -n 1
           )"
+
           ZIPALIGN="$(
             find "$HOME/.buildozer" -type f -name zipalign -perm -111 \
               -print 2>/dev/null | sort -V | tail -n 1
           )"
+
           AAPT="$(
             find "$HOME/.buildozer" -type f -name aapt -perm -111 \
               -print 2>/dev/null | sort -V | tail -n 1
@@ -232,12 +242,19 @@ jobs:
           test -n "$APK"
 
           echo "Build APK: $APK"
+
           BADGING="$("$AAPT" dump badging "$APK")"
+
           printf '%s\n' "$BADGING" | sed -n '1,5p'
 
-          printf '%s\n' "$BADGING" | grep -q "package: name='org.selflearningtrader.selflearningtrader'"
-          printf '%s\n' "$BADGING" | grep -q "versionCode='10158'"
-          printf '%s\n' "$BADGING" | grep -q "versionName='1.0.158'"
+          printf '%s\n' "$BADGING" |
+            grep -q "package: name='org.selflearningtrader.selflearningtrader'"
+
+          printf '%s\n' "$BADGING" |
+            grep -q "versionCode='10158'"
+
+          printf '%s\n' "$BADGING" |
+            grep -q "versionName='1.0.158'"
 
       - name: Align and sign APK with fixed FIVE key
         shell: bash
@@ -251,7 +268,9 @@ jobs:
           rm -rf signed
           mkdir -p signed
 
-          "$ZIPALIGN" -f -p 4 "$APK" signed/aligned.apk
+          "$ZIPALIGN" -f -p 4 \
+            "$APK" \
+            signed/aligned.apk
 
           "$APKSIGNER" sign \
             --ks "$HOME/.android/debug.keystore" \
@@ -302,42 +321,4 @@ jobs:
           )"
 
           APK_SHA="$(
-            awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' apk-cert.txt
-          )"
-
-          test -n "$KEY_SHA"
-          test -n "$APK_SHA"
-
-          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
-          APK_SHA="$(echo "$APK_SHA" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
-
-          echo "Keystore SHA-256: $KEY_SHA"
-          echo "APK SHA-256:      $APK_SHA"
-
-          test "$KEY_SHA" = "$APK_SHA"
-
-          "$ZIPALIGN" -c -P 4 -v 4 "$APK"
-
-          FINAL_BADGING="$("$AAPT" dump badging "$APK")"
-          printf '%s\n' "$FINAL_BADGING" | sed -n '1,5p'
-          printf '%s\n' "$FINAL_BADGING" | grep -q "package: name='org.selflearningtrader.selflearningtrader'"
-          printf '%s\n' "$FINAL_BADGING" | grep -q "versionCode='10158'"
-          printf '%s\n' "$FINAL_BADGING" | grep -q "versionName='1.0.158'"
-
-          echo "FINAL APK VERIFICATION PASSED."
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SelfLearningTrader-FIVE-build-log
-          path: build.log
-          if-no-files-found: warn
-
-      - name: Upload final verified APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SelfLearningTrader-FIVE-verified-apk
-          path: bin/*.apk
-          if-no-files-found: error
+            grep -m1 '
