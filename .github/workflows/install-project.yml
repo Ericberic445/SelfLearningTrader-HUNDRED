@@ -181,7 +181,7 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
 
-          export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+          export JAVA_HOME="$JAVA_HOME_17_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
 
           java -version
