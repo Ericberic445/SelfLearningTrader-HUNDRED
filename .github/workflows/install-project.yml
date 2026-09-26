@@ -127,4 +127,260 @@ jobs:
 
           PACKAGE_ID="${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
 
-          echo "Package domain
+          echo "Package domain: $PACKAGE_DOMAIN"
+          echo "Package name:   $PACKAGE_NAME"
+          echo "Package ID:     $PACKAGE_ID"
+          echo "Version:        $VERSION"
+          echo "Version code:   $NUMERIC_VERSION"
+
+          test "$PACKAGE_ID" = "org.selflearningtrader.hundred"
+          test "$VERSION" = "1.0.198"
+          test "$NUMERIC_VERSION" = "10198"
+
+          python3 -m compileall -q app
+
+          mkdir -p "$HOME/.android"
+          cp signing/debug.keystore "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+
+          keytool -list \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey >/dev/null
+
+          KEY_SHA="$(
+            keytool -list -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey |
+              awk -F': ' '/SHA256:/{print $2; exit}'
+          )"
+
+          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+
+          test "$KEY_SHA" = "13:E0:41:41:39:05:CE:30:B0:AA:3E:40:5A:F9:7D:DE:86:2B:0C:3C:FE:DD:DB:8B:66:52:FA:28:D6:68:7F:04"
+
+          echo "=== FIXED KEY CERTIFICATE ==="
+
+          keytool -list -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey |
+            grep -E 'Owner:|SHA256:'
+
+          echo "Installed project and signing-key verification passed."
+
+      - name: Clean Android build state
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          rm -rf .buildozer bin signed
+
+          find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+
+          find . -type f -name '*.pyc' -delete
+          find . -type f -name '*.pyo' -delete
+
+      - name: Build Android APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+
+          test -x "$JAVA_HOME/bin/java"
+          test -x "$JAVA_HOME/bin/javac"
+
+          java -version
+          javac -version
+
+          buildozer -v android debug 2>&1 | tee build.log
+
+      - name: Locate Android signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APKSIGNER="$(
+            find "$HOME/.buildozer" -type f -name apksigner -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
+          )"
+
+          ZIPALIGN="$(
+            find "$HOME/.buildozer" -type f -name zipalign -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
+          )"
+
+          AAPT="$(
+            find "$HOME/.buildozer" -type f -name aapt -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
+          )"
+
+          test -n "$APKSIGNER"
+          test -n "$ZIPALIGN"
+          test -n "$AAPT"
+
+          echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
+          echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
+          echo "AAPT=$AAPT" >> "$GITHUB_ENV"
+
+          "$APKSIGNER" version
+          test -x "$ZIPALIGN"
+          "$AAPT" version
+
+      - name: Verify build APK package and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          APK="$(find bin -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+
+          echo "Build APK: $APK"
+
+          BADGING="$("$AAPT" dump badging "$APK")"
+
+          printf '%s\n' "$BADGING" | sed -n '1,5p'
+
+          printf '%s\n' "$BADGING" |
+            grep -q "package: name='org.selflearningtrader.hundred'"
+
+          printf '%s\n' "$BADGING" |
+            grep -q "versionCode='10198'"
+
+          printf '%s\n' "$BADGING" |
+            grep -q "versionName='1.0.198'"
+
+      - name: Align and sign APK with fixed HUNDRED key
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          APK="$(find bin -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+
+          rm -rf signed
+          mkdir -p signed
+
+          "$ZIPALIGN" -f -p 4 "$APK" signed/aligned.apk
+
+          "$APKSIGNER" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out signed/final.apk \
+            signed/aligned.apk
+
+          "$APKSIGNER" verify \
+            --verbose \
+            --print-certs \
+            signed/final.apk
+
+          rm -f bin/*.apk
+          cp signed/final.apk bin/
+
+      - name: Verify final APK identity, alignment and certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          APK="$(find bin -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+
+          echo "=== FINAL APK ==="
+          ls -lh "$APK"
+
+          "$APKSIGNER" verify \
+            --verbose \
+            --print-certs \
+            "$APK" | tee apk-cert.txt
+
+          grep -q "Verified using v1 scheme (JAR signing): true" apk-cert.txt
+          grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" apk-cert.txt
+          grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" apk-cert.txt
+
+          KEY_SHA="$(
+            keytool -list -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey |
+              awk -F': ' '/SHA256:/{print $2; exit}'
+          )"
+
+          APK_SHA="$(
+            awk '
+              /certificate SHA-256 digest:/ {
+                capture=1
+                sub(/^.*certificate SHA-256 digest:[[:space:]]*/, "")
+                gsub(/[[:space:]]/, "")
+                value=value $0
+                next
+              }
+
+              capture && /certificate SHA-1 digest:/ {
+                print value
+                exit
+              }
+
+              capture {
+                gsub(/[[:space:]]/, "")
+                value=value $0
+              }
+            ' apk-cert.txt
+          )"
+
+          test -n "$KEY_SHA"
+          test -n "$APK_SHA"
+
+          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+          APK_SHA="$(echo "$APK_SHA" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+
+          echo "Keystore SHA-256: $KEY_SHA"
+          echo "APK SHA-256:      $APK_SHA"
+
+          test "$KEY_SHA" = "$APK_SHA"
+
+          "$ZIPALIGN" -c -P 4 -v 4 "$APK"
+
+          FINAL_BADGING="$("$AAPT" dump badging "$APK")"
+
+          printf '%s\n' "$FINAL_BADGING" | sed -n '1,5p'
+
+          printf '%s\n' "$FINAL_BADGING" |
+            grep -q "package: name='org.selflearningtrader.hundred'"
+
+          printf '%s\n' "$FINAL_BADGING" |
+            grep -q "versionCode='10198'"
+
+          printf '%s\n' "$FINAL_BADGING" |
+            grep -q "versionName='1.0.198'"
+
+          echo "FINAL APK VERIFICATION PASSED."
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfLearningTrader-HUNDRED-build-log
+          path: build.log
+          if-no-files-found: warn
+
+      - name: Upload final verified APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfLearningTrader-HUNDRED-verified-apk
+          path: bin/*.apk
+          if-no-files-found: error
