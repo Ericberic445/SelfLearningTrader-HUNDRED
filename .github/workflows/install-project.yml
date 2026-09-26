@@ -1,11 +1,11 @@
-name: Install and Build HUNDRED
+name: Install and Build FIVE
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "SelfLearningTrader_HUNDRED_*.zip"
-      - "**/SelfLearningTrader_HUNDRED_*.zip"
+      - "SelfLearningTrader_FIVE_*.zip"
+      - "**/SelfLearningTrader_FIVE_*.zip"
 
 permissions:
   contents: write
@@ -21,14 +21,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Select and extract HUNDRED ZIP
+      - name: Select and extract FIVE ZIP
         shell: bash
         run: |
           set -euo pipefail
 
           mapfile -t ZIPS < <(
             find "$GITHUB_WORKSPACE" -type f \
-              -name 'SelfLearningTrader_HUNDRED_*.zip' \
+              -name 'SelfLearningTrader_FIVE_*.zip' \
               -not -path "$GITHUB_WORKSPACE/.git/*" \
               -print | sort -V
           )
@@ -42,7 +42,7 @@ jobs:
           sha256sum "$ZIP"
           unzip -q -t "$ZIP"
 
-          INSTALL_ROOT="/tmp/hundred_project"
+          INSTALL_ROOT="/tmp/five_project"
 
           rm -rf "$INSTALL_ROOT"
           mkdir -p "$INSTALL_ROOT"
@@ -136,18 +136,11 @@ jobs:
           echo "Version:        $VERSION"
           echo "Version code:   $NUMERIC_VERSION"
 
-          # HUNDRED package ID is intentionally fixed.
-          test "$PACKAGE_ID" = "org.selflearningtrader.hundred"
+          test "$PACKAGE_ID" = "org.selflearningtrader.selflearningtrader"
 
-          # Version is NOT hardcoded.
-          # It comes directly from buildozer.spec inside the selected ZIP.
-
-          # Numeric version is NOT hardcoded.
-          # It comes directly from buildozer.spec inside the selected ZIP.
-
-          echo "HUNDRED_PACKAGE_ID=$PACKAGE_ID" >> "$GITHUB_ENV"
-          echo "HUNDRED_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "HUNDRED_VERSION_CODE=$NUMERIC_VERSION" >> "$GITHUB_ENV"
+          echo "FIVE_PACKAGE_ID=$PACKAGE_ID" >> "$GITHUB_ENV"
+          echo "FIVE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "FIVE_VERSION_CODE=$NUMERIC_VERSION" >> "$GITHUB_ENV"
 
           python3 -m compileall -q app
 
@@ -341,21 +334,19 @@ jobs:
           printf '%s\n' "$BADGING" |
             sed -n '1,5p'
 
-          # Package ID must remain the fixed HUNDRED package.
           printf '%s\n' "$BADGING" |
             grep -q \
-            "package: name='${HUNDRED_PACKAGE_ID}'"
-
-          # Version is taken dynamically from the ZIP.
-          printf '%s\n' "$BADGING" |
-            grep -q \
-            "versionCode='${HUNDRED_VERSION_CODE}'"
+            "package: name='${FIVE_PACKAGE_ID}'"
 
           printf '%s\n' "$BADGING" |
             grep -q \
-            "versionName='${HUNDRED_VERSION}'"
+            "versionCode='${FIVE_VERSION_CODE}'"
 
-      - name: Align and sign APK with fixed HUNDRED key
+          printf '%s\n' "$BADGING" |
+            grep -q \
+            "versionName='${FIVE_VERSION}'"
+
+      - name: Align and sign APK with fixed FIVE key
         shell: bash
         run: |
           set -euo pipefail
@@ -426,8 +417,10 @@ jobs:
             "$APK" |
             tee apk-cert.txt
 
-          # v2 and v3 are required.
-          # v1 result is intentionally not used as a failure condition.
+          grep -q \
+            "Verified using v1 scheme (JAR signing): true" \
+            apk-cert.txt
+
           grep -q \
             "Verified using v2 scheme (APK Signature Scheme v2): true" \
             apk-cert.txt
@@ -501,15 +494,15 @@ jobs:
 
           printf '%s\n' "$FINAL_BADGING" |
             grep -q \
-            "package: name='${HUNDRED_PACKAGE_ID}'"
+            "package: name='${FIVE_PACKAGE_ID}'"
 
           printf '%s\n' "$FINAL_BADGING" |
             grep -q \
-            "versionCode='${HUNDRED_VERSION_CODE}'"
+            "versionCode='${FIVE_VERSION_CODE}'"
 
           printf '%s\n' "$FINAL_BADGING" |
             grep -q \
-            "versionName='${HUNDRED_VERSION}'"
+            "versionName='${FIVE_VERSION}'"
 
           echo "FINAL APK VERIFICATION PASSED."
 
@@ -517,7 +510,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SelfLearningTrader-HUNDRED-build-log
+          name: SelfLearningTrader-FIVE-build-log
           path: build.log
           if-no-files-found: warn
 
@@ -525,6 +518,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SelfLearningTrader-HUNDRED-verified-apk
+          name: SelfLearningTrader-FIVE-verified-apk
           path: bin/*.apk
           if-no-files-found: error
