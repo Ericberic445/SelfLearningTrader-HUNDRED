@@ -1,210 +1,143 @@
-name: Build SelfLearningTrader FIVE
+name: Install and Build FIVE
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "*.zip"
-      - "**/*.zip"
+      - "SelfLearningTrader_FIVE_*.zip"
+      - "**/SelfLearningTrader_FIVE_*.zip"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
+  install-and-build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Find and extract project ZIP
+      - name: Select and extract FIVE ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="$(
-            find "$GITHUB_WORKSPACE" \
-              -type f \
+          mapfile -t ZIPS < <(
+            find "$GITHUB_WORKSPACE" -type f \
               -name 'SelfLearningTrader_FIVE_*.zip' \
               -not -path "$GITHUB_WORKSPACE/.git/*" \
-              -print |
-            sort -V |
-            tail -n 1
-          )"
+              -print | sort -V
+          )
 
-          test -n "$ZIP"
+          test "${#ZIPS[@]}" -gt 0
+          ZIP="${ZIPS[${#ZIPS[@]}-1]}"
 
-          echo "Selected ZIP:"
-          echo "$ZIP"
-
+          echo "Selected ZIP: $ZIP"
+          sha256sum "$ZIP"
           unzip -q -t "$ZIP"
 
           INSTALL_ROOT="/tmp/five_project"
-
           rm -rf "$INSTALL_ROOT"
           mkdir -p "$INSTALL_ROOT"
-
           unzip -q -o "$ZIP" -d "$INSTALL_ROOT"
 
           ROOT="$INSTALL_ROOT"
-
           mapfile -t TOP < <(
-            find "$INSTALL_ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
+            find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -print
           )
 
           if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
             ROOT="${TOP[0]}"
           fi
 
-          echo "Project root:"
-          echo "$ROOT"
+          echo "Project root: $ROOT"
 
-          test -f "$ROOT/buildozer.spec"
-          test -f "$ROOT/requirements.txt"
-          test -f "$ROOT/app/main.py"
-          test -f "$ROOT/signing/debug.keystore"
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            "$ROOT"/ "$GITHUB_WORKSPACE"/
 
-          echo "Project extracted successfully."
+          rm -rf "$INSTALL_ROOT"
 
-      - name: Prepare update version
-        shell: bash
-        run: |
-          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          test -f buildozer.spec
+          test -f requirements.txt
+          test -f app/main.py
+          test -f signing/debug.keystore
 
-          ROOT="/tmp/five_project"
-
-          mapfile -t TOP < <(
-            find "$ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
-          )
-
-          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
-            ROOT="${TOP[0]}"
-          fi
-
-          PACKAGE_DOMAIN="$(
-            sed -n \
-              's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' \
-              "$ROOT/buildozer.spec" |
-            tail -n 1 |
-            xargs
-          )"
-
-          PACKAGE_NAME="$(
-            sed -n \
-              's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' \
-              "$ROOT/buildozer.spec" |
-            tail -n 1 |
-            xargs
-          )"
-
-          VERSION="$(
-            sed -n \
-              's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
-              "$ROOT/buildozer.spec" |
-            tail -n 1 |
-            xargs
-          )"
-
-          VERSION_CODE="$(
-            sed -n \
-              's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
-              "$ROOT/buildozer.spec" |
-            tail -n 1 |
-            xargs
-          )"
-
-          test "$PACKAGE_DOMAIN" = "org.selflearningtrader"
-          test "$PACKAGE_NAME" = "selflearningtrader"
-          test -n "$VERSION"
-          test -n "$VERSION_CODE"
-
-          if [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            MAJOR="${BASH_REMATCH[1]}"
-            MINOR="${BASH_REMATCH[2]}"
-            PATCH="${BASH_REMATCH[3]}"
-
-            NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
-          else
-            echo "ERROR: Unsupported version: $VERSION"
-            exit 1
-          fi
-
-          NEW_VERSION_CODE=$((VERSION_CODE + 1))
-
-          sed -i \
-            "s/^[[:space:]]*version[[:space:]]*=.*/version = ${NEW_VERSION}/" \
-            "$ROOT/buildozer.spec"
-
-          sed -i \
-            "s/^[[:space:]]*android.numeric_version[[:space:]]*=.*/android.numeric_version = ${NEW_VERSION_CODE}/" \
-            "$ROOT/buildozer.spec"
-
-          echo "Package ID: ${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
-          echo "Old version: $VERSION"
-          echo "New version: $NEW_VERSION"
-          echo "Old version code: $VERSION_CODE"
-          echo "New version code: $NEW_VERSION_CODE"
+          echo "=== PROJECT VERSION ==="
+          grep -E '^[[:space:]]*(package.name|package.domain|version|android.numeric_version)[[:space:]]*=' buildozer.spec
 
       - name: Install Android build dependencies
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           sudo apt-get update
-
           sudo apt-get install -y \
-            git \
-            zip \
-            unzip \
-            openjdk-17-jdk \
-            autoconf \
-            automake \
-            libtool \
-            pkg-config \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            cmake \
-            libffi-dev \
-            libssl-dev
+            ant autoconf automake autopoint ccache cmake \
+            g++ gcc gettext git lbzip2 \
+            libffi-dev libltdl-dev libncurses5-dev libncursesw5-dev \
+            libssl-dev libtool make openjdk-17-jdk patch pkg-config \
+            python3 python3-dev python3-pip python3-venv rsync \
+            unzip wget zip zlib1g-dev
 
           python3 -m pip install --upgrade pip
-          python3 -m pip install "cython<3" buildozer==1.5.0
+          python3 -m pip install "cython==3.0.12" "buildozer==1.5.0"
 
-      - name: Prepare fixed signing key
+      - name: Verify installed project and fixed signing key
         shell: bash
         run: |
           set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
 
-          ROOT="/tmp/five_project"
+          test -f buildozer.spec
+          test -f requirements.txt
+          test -f app/main.py
+          test -f signing/debug.keystore
 
-          mapfile -t TOP < <(
-            find "$ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
-          )
+          PACKAGE_DOMAIN="$(
+            sed -n 's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' buildozer.spec |
+              tail -n 1 | xargs
+          )"
+          PACKAGE_NAME="$(
+            sed -n 's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' buildozer.spec |
+              tail -n 1 | xargs
+          )"
+          VERSION="$(
+            sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
+              tail -n 1 | xargs
+          )"
+          NUMERIC_VERSION="$(
+            sed -n 's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
+              tail -n 1 | xargs
+          )"
 
-          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
-            ROOT="${TOP[0]}"
-          fi
+          test -n "$PACKAGE_DOMAIN"
+          test -n "$PACKAGE_NAME"
+          test -n "$VERSION"
+          test -n "$NUMERIC_VERSION"
 
-          test -f "$ROOT/signing/debug.keystore"
+          PACKAGE_ID="${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
+
+          echo "Package domain: $PACKAGE_DOMAIN"
+          echo "Package name:   $PACKAGE_NAME"
+          echo "Package ID:     $PACKAGE_ID"
+          echo "Version:        $VERSION"
+          echo "Version code:   $NUMERIC_VERSION"
+
+          test "$PACKAGE_ID" = "org.selflearningtrader.selflearningtrader"
+          test "$VERSION" = "1.0.158"
+          test "$NUMERIC_VERSION" = "10158"
+
+          python3 -m compileall -q app
 
           mkdir -p "$HOME/.android"
-
-          cp \
-            "$ROOT/signing/debug.keystore" \
-            "$HOME/.android/debug.keystore"
-
+          cp signing/debug.keystore "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
 
           keytool -list \
@@ -212,235 +145,86 @@ jobs:
             -storepass android \
             -alias androiddebugkey >/dev/null
 
-          echo "Fixed signing key prepared."
+          KEY_SHA="$(
+            keytool -list -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey |
+              awk -F': ' '/SHA256:/{print $2; exit}'
+          )"
+          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          test "$KEY_SHA" = "13:E0:41:41:39:05:CE:30:B0:AA:3E:40:5A:F9:7D:DE:86:2B:0C:3C:FE:DD:DB:8B:66:52:FA:28:D6:68:7F:04"
 
-      - name: Verify project before build
+          echo "=== FIXED KEY CERTIFICATE ==="
+          keytool -list -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey |
+            grep -E 'Owner:|SHA256:'
+
+          echo "Installed project and signing-key verification passed."
+
+      - name: Clean Android build state
         shell: bash
         run: |
           set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
 
-          ROOT="/tmp/five_project"
-
-          mapfile -t TOP < <(
-            find "$ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
-          )
-
-          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
-            ROOT="${TOP[0]}"
-          fi
-
-          test -f "$ROOT/buildozer.spec"
-          test -f "$ROOT/requirements.txt"
-          test -f "$ROOT/app/main.py"
-          test -f "$ROOT/signing/debug.keystore"
-
-          grep -q \
-            '^package.domain[[:space:]]*=[[:space:]]*org.selflearningtrader$' \
-            "$ROOT/buildozer.spec"
-
-          grep -q \
-            '^package.name[[:space:]]*=[[:space:]]*selflearningtrader$' \
-            "$ROOT/buildozer.spec"
-
-          grep -q \
-            '^version[[:space:]]*=' \
-            "$ROOT/buildozer.spec"
-
-          grep -q \
-            '^android.numeric_version[[:space:]]*=' \
-            "$ROOT/buildozer.spec"
-
-          python3 -m compileall -q "$ROOT/app"
-
-          echo "Project verification passed."
+          rm -rf .buildozer bin signed
+          find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+          find . -type f -name '*.pyc' -o -name '*.pyo' -delete
 
       - name: Build Android APK
         shell: bash
         run: |
           set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
 
-          ROOT="/tmp/five_project"
-
-          mapfile -t TOP < <(
-            find "$ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
-          )
-
-          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
-            ROOT="${TOP[0]}"
-          fi
-
-          cd "$ROOT"
-
-          export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+          export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
           export PATH="$JAVA_HOME/bin:$PATH"
-
-          export GRADLE_OPTS="-Dorg.gradle.java.home=$JAVA_HOME"
 
           java -version
           javac -version
 
-          rm -rf .buildozer bin
+          buildozer -v android debug 2>&1 | tee build.log
 
-          buildozer -v android debug
-
-          APK="$(
-            find "$ROOT/bin" \
-              -maxdepth 1 \
-              -type f \
-              -name '*.apk' \
-              -print |
-            sort -V |
-            tail -n 1
-          )"
-
-          test -n "$APK"
-          test -f "$APK"
+      - name: Locate Android signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
 
           APKSIGNER="$(
-            find "$ANDROID_HOME/build-tools" \
-              -type f \
-              -name apksigner \
-              -print |
-            sort -V |
-            tail -n 1
+            find "$HOME/.buildozer" -type f -name apksigner -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
           )"
-
-          test -x "$APKSIGNER"
-
-          "$APKSIGNER" sign \
-            --ks "$ROOT/signing/debug.keystore" \
-            --ks-key-alias androiddebugkey \
-            --ks-pass pass:android \
-            --key-pass pass:android \
-            "$APK"
-
-          "$APKSIGNER" verify \
-            --verbose \
-            --print-certs \
-            "$APK"
-
-      - name: Locate final APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          ROOT="/tmp/five_project"
-
-          mapfile -t TOP < <(
-            find "$ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
-          )
-
-          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
-            ROOT="${TOP[0]}"
-          fi
-
-          APK="$(
-            find "$ROOT/bin" \
-              -maxdepth 1 \
-              -type f \
-              -name '*.apk' \
-              -print |
-            sort -V |
-            tail -n 1
+          ZIPALIGN="$(
+            find "$HOME/.buildozer" -type f -name zipalign -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
           )"
-
-          test -n "$APK"
-          test -f "$APK"
-
-          echo "Final APK:"
-          echo "$APK"
-
-          mkdir -p "$GITHUB_WORKSPACE/final"
-
-          cp \
-            "$APK" \
-            "$GITHUB_WORKSPACE/final/SelfLearningTrader-FIVE.apk"
-
-          test -f \
-            "$GITHUB_WORKSPACE/final/SelfLearningTrader-FIVE.apk"
-
-      - name: Verify final APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          ROOT="/tmp/five_project"
-
-          mapfile -t TOP < <(
-            find "$ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
-          )
-
-          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
-            ROOT="${TOP[0]}"
-          fi
-
-          APK="$GITHUB_WORKSPACE/final/SelfLearningTrader-FIVE.apk"
-
-          test -f "$APK"
-
-          SDK_ROOT="${ANDROID_HOME:-$HOME/.buildozer/android/platform/android-sdk}"
-
           AAPT="$(
-            find "$SDK_ROOT/build-tools" \
-              -type f \
-              -name aapt \
-              -print |
-            sort -V |
-            tail -n 1
+            find "$HOME/.buildozer" -type f -name aapt -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
           )"
 
-          APKSIGNER="$(
-            find "$SDK_ROOT/build-tools" \
-              -type f \
-              -name apksigner \
-              -print |
-            sort -V |
-            tail -n 1
-          )"
+          test -n "$APKSIGNER"
+          test -n "$ZIPALIGN"
+          test -n "$AAPT"
 
-          test -x "$AAPT"
-          test -x "$APKSIGNER"
+          echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
+          echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
+          echo "AAPT=$AAPT" >> "$GITHUB_ENV"
 
-          echo "=== APK BADGING ==="
+          "$APKSIGNER" version
+          "$ZIPALIGN" -h >/dev/null
+          "$AAPT" version
 
-          BADGING="$("$AAPT" dump badging "$APK")"
+      - name: Verify build APK package and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
 
-          echo "$BADGING"
+          APK="$(find bin -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
 
-          echo "$BADGING" |
-            grep -q \
-              "package: name='org.selflearningtrader.selflearningtrader'"
-
-          ACTUAL_VERSION_CODE="$(
-            echo "$BADGING" |
-              sed -n \
-                "s/.*versionCode='[^']*'.*/\1/p"
-          )"
-
-          ACTUAL_VERSION="$(
-            echo "$BADGING" |
-              sed -n \
-                "s/.*versionName='[^']*'.*/\1/p"
-          )"
-
-          EXPECTED_VERSION_CODE="$(
-            sed -n \
-              's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
-              "$ROOT/buildozer.spec" |
-            tail -n 1 |
-            xargs
-          )"
-
-          EXPECTED
+          echo
