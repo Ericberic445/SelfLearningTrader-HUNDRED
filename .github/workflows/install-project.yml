@@ -1,4 +1,4 @@
-name: Build SelfLearningTrader HUNDRED
+name: Build SelfLearningTrader FIVE
 
 on:
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
           ZIP="$(
             find "$GITHUB_WORKSPACE" \
               -type f \
-              -name 'SelfLearningTrader_HUNDRED_*.zip' \
+              -name 'SelfLearningTrader_FIVE_*.zip' \
               -not -path "$GITHUB_WORKSPACE/.git/*" \
               -print |
             sort -V |
@@ -41,7 +41,7 @@ jobs:
 
           unzip -q -t "$ZIP"
 
-          INSTALL_ROOT="/tmp/hundred_project"
+          INSTALL_ROOT="/tmp/five_project"
 
           rm -rf "$INSTALL_ROOT"
           mkdir -p "$INSTALL_ROOT"
@@ -76,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ROOT="/tmp/hundred_project"
+          ROOT="/tmp/five_project"
 
           mapfile -t TOP < <(
             find "$ROOT" \
@@ -122,7 +122,7 @@ jobs:
           )"
 
           test "$PACKAGE_DOMAIN" = "org.selflearningtrader"
-          test "$PACKAGE_NAME" = "hundred"
+          test "$PACKAGE_NAME" = "selflearningtrader"
           test -n "$VERSION"
           test -n "$VERSION_CODE"
 
@@ -184,7 +184,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ROOT="/tmp/hundred_project"
+          ROOT="/tmp/five_project"
 
           mapfile -t TOP < <(
             find "$ROOT" \
@@ -219,7 +219,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ROOT="/tmp/hundred_project"
+          ROOT="/tmp/five_project"
 
           mapfile -t TOP < <(
             find "$ROOT" \
@@ -242,7 +242,7 @@ jobs:
             "$ROOT/buildozer.spec"
 
           grep -q \
-            '^package.name[[:space:]]*=[[:space:]]*hundred$' \
+            '^package.name[[:space:]]*=[[:space:]]*selflearningtrader$' \
             "$ROOT/buildozer.spec"
 
           grep -q \
@@ -262,7 +262,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ROOT="/tmp/hundred_project"
+          ROOT="/tmp/five_project"
 
           mapfile -t TOP < <(
             find "$ROOT" \
@@ -330,7 +330,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ROOT="/tmp/hundred_project"
+          ROOT="/tmp/five_project"
 
           mapfile -t TOP < <(
             find "$ROOT" \
@@ -363,17 +363,17 @@ jobs:
 
           cp \
             "$APK" \
-            "$GITHUB_WORKSPACE/final/SelfLearningTrader-HUNDRED.apk"
+            "$GITHUB_WORKSPACE/final/SelfLearningTrader-FIVE.apk"
 
           test -f \
-            "$GITHUB_WORKSPACE/final/SelfLearningTrader-HUNDRED.apk"
+            "$GITHUB_WORKSPACE/final/SelfLearningTrader-FIVE.apk"
 
       - name: Verify final APK
         shell: bash
         run: |
           set -euo pipefail
 
-          ROOT="/tmp/hundred_project"
+          ROOT="/tmp/five_project"
 
           mapfile -t TOP < <(
             find "$ROOT" \
@@ -386,7 +386,7 @@ jobs:
             ROOT="${TOP[0]}"
           fi
 
-          APK="$GITHUB_WORKSPACE/final/SelfLearningTrader-HUNDRED.apk"
+          APK="$GITHUB_WORKSPACE/final/SelfLearningTrader-FIVE.apk"
 
           test -f "$APK"
 
@@ -421,18 +421,18 @@ jobs:
 
           echo "$BADGING" |
             grep -q \
-              "package: name='org.selflearningtrader.hundred'"
+              "package: name='org.selflearningtrader.selflearningtrader'"
 
           ACTUAL_VERSION_CODE="$(
             echo "$BADGING" |
               sed -n \
-                "s/.*versionCode='\([^']*\)'.*/\1/p"
+                "s/.*versionCode='[^']*'.*/\1/p"
           )"
 
           ACTUAL_VERSION="$(
             echo "$BADGING" |
               sed -n \
-                "s/.*versionName='\([^']*\)'.*/\1/p"
+                "s/.*versionName='[^']*'.*/\1/p"
           )"
 
           EXPECTED_VERSION_CODE="$(
@@ -443,66 +443,4 @@ jobs:
             xargs
           )"
 
-          EXPECTED_VERSION="$(
-            sed -n \
-              's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
-              "$ROOT/buildozer.spec" |
-            tail -n 1 |
-            xargs
-          )"
-
-          test -n "$ACTUAL_VERSION_CODE"
-          test -n "$ACTUAL_VERSION"
-
-          test "$ACTUAL_VERSION_CODE" = "$EXPECTED_VERSION_CODE"
-          test "$ACTUAL_VERSION" = "$EXPECTED_VERSION"
-
-          echo "=== APK SIGNATURE ==="
-
-          "$APKSIGNER" verify \
-            --verbose \
-            --print-certs \
-            "$APK"
-
-          EXPECTED_SHA="$(
-            keytool -list -v \
-              -keystore "$ROOT/signing/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey |
-            sed -n \
-              's/^[[:space:]]*SHA256:[[:space:]]*//p' |
-            tr -d ':' |
-            tr '[:lower:]' '[:upper:]'
-          )"
-
-          ACTUAL_SHA="$(
-            "$APKSIGNER" verify \
-              --verbose \
-              --print-certs \
-              "$APK" 2>&1 |
-            sed -n \
-              's/.*certificate SHA-256 digest: //p' |
-            head -n 1 |
-            tr -d ':' |
-            tr '[:lower:]' '[:upper:]'
-          )"
-
-          test -n "$EXPECTED_SHA"
-          test -n "$ACTUAL_SHA"
-
-          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
-
-          echo "========================================"
-          echo "FINAL APK VERIFICATION PASSED"
-          echo "Package: org.selflearningtrader.hundred"
-          echo "Version: $ACTUAL_VERSION"
-          echo "Version code: $ACTUAL_VERSION_CODE"
-          echo "Certificate SHA-256: $ACTUAL_SHA"
-          echo "========================================"
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: SelfLearningTrader-HUNDRED-apk
-          path: final/SelfLearningTrader-HUNDRED.apk
-          if-no-files-found: error
+          EXPECTED
