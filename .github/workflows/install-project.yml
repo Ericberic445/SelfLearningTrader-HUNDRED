@@ -172,7 +172,8 @@ jobs:
 
           rm -rf .buildozer bin signed
           find . -type d -name '__pycache__' -prune -exec rm -rf {} +
-          find . -type f -name '*.pyc' -o -name '*.pyo' -delete
+          find . -type f -name '*.pyc' -delete
+          find . -type f -name '*.pyo' -delete
 
       - name: Build Android APK
         shell: bash
@@ -227,4 +228,114 @@ jobs:
           APK="$(find bin -type f -name '*.apk' -print -quit)"
           test -n "$APK"
 
-          echo
+          echo "Build APK: $APK"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | sed -n '1,5p'
+
+          printf '%s\n' "$BADGING" | grep -q "package: name='org.selflearningtrader.selflearningtrader'"
+          printf '%s\n' "$BADGING" | grep -q "versionCode='10158'"
+          printf '%s\n' "$BADGING" | grep -q "versionName='1.0.158'"
+
+      - name: Align and sign APK with fixed FIVE key
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          APK="$(find bin -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+
+          rm -rf signed
+          mkdir -p signed
+
+          "$ZIPALIGN" -f -p 4 "$APK" signed/aligned.apk
+
+          "$APKSIGNER" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out signed/final.apk \
+            signed/aligned.apk
+
+          "$APKSIGNER" verify \
+            --verbose \
+            --print-certs \
+            signed/final.apk
+
+          rm -f bin/*.apk
+          cp signed/final.apk bin/
+
+      - name: Verify final APK identity, alignment and certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          APK="$(find bin -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+
+          echo "=== FINAL APK ==="
+          ls -lh "$APK"
+
+          "$APKSIGNER" verify \
+            --verbose \
+            --print-certs \
+            "$APK" | tee apk-cert.txt
+
+          grep -q "Verified using v1 scheme (JAR signing): true" apk-cert.txt
+          grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" apk-cert.txt
+          grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" apk-cert.txt
+
+          KEY_SHA="$(
+            keytool -list -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey |
+              awk -F': ' '/SHA256:/{print $2; exit}'
+          )"
+
+          APK_SHA="$(
+            awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' apk-cert.txt
+          )"
+
+          test -n "$KEY_SHA"
+          test -n "$APK_SHA"
+
+          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          APK_SHA="$(echo "$APK_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+
+          echo "Keystore SHA-256: $KEY_SHA"
+          echo "APK SHA-256:      $APK_SHA"
+
+          test "$KEY_SHA" = "$APK_SHA"
+
+          "$ZIPALIGN" -c -P 4 -v 4 "$APK"
+
+          FINAL_BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$FINAL_BADGING" | sed -n '1,5p'
+          printf '%s\n' "$FINAL_BADGING" | grep -q "package: name='org.selflearningtrader.selflearningtrader'"
+          printf '%s\n' "$FINAL_BADGING" | grep -q "versionCode='10158'"
+          printf '%s\n' "$FINAL_BADGING" | grep -q "versionName='1.0.158'"
+
+          echo "FINAL APK VERIFICATION PASSED."
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfLearningTrader-FIVE-build-log
+          path: build.log
+          if-no-files-found: warn
+
+      - name: Upload final verified APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfLearningTrader-FIVE-verified-apk
+          path: bin/*.apk
+          if-no-files-found: error
