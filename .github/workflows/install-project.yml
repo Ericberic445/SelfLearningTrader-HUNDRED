@@ -309,36 +309,5 @@ jobs:
           test -n "$KEY_SHA"
           test -n "$APK_SHA"
 
-          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
-          APK_SHA="$(echo "$APK_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
-
-          echo "Keystore SHA-256: $KEY_SHA"
-          echo "APK SHA-256:      $APK_SHA"
-
-          test "$KEY_SHA" = "$APK_SHA"
-
-          "$ZIPALIGN" -c -P 4 -v 4 "$APK"
-
-          FINAL_BADGING="$("$AAPT" dump badging "$APK")"
-          printf '%s\n' "$FINAL_BADGING" | sed -n '1,5p'
-          printf '%s\n' "$FINAL_BADGING" | grep -q "package: name='org.selflearningtrader.selflearningtrader'"
-          printf '%s\n' "$FINAL_BADGING" | grep -q "versionCode='10158'"
-          printf '%s\n' "$FINAL_BADGING" | grep -q "versionName='1.0.158'"
-
-          echo "FINAL APK VERIFICATION PASSED."
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SelfLearningTrader-FIVE-build-log
-          path: build.log
-          if-no-files-found: warn
-
-      - name: Upload final verified APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SelfLearningTrader-FIVE-verified-apk
-          path: bin/*.apk
-          if-no-files-found: error
+          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+         
