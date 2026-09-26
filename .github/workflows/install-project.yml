@@ -1,11 +1,11 @@
-name: Install and Build FIVE
+name: Install and Build HUNDRED
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "SelfLearningTrader_FIVE_*.zip"
-      - "**/SelfLearningTrader_FIVE_*.zip"
+      - "SelfLearningTrader_HUNDRED_*.zip"
+      - "**/SelfLearningTrader_HUNDRED_*.zip"
 
 permissions:
   contents: write
@@ -21,14 +21,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Select and extract FIVE ZIP
+      - name: Select and extract HUNDRED ZIP
         shell: bash
         run: |
           set -euo pipefail
 
           mapfile -t ZIPS < <(
             find "$GITHUB_WORKSPACE" -type f \
-              -name 'SelfLearningTrader_FIVE_*.zip' \
+              -name 'SelfLearningTrader_HUNDRED_*.zip' \
               -not -path "$GITHUB_WORKSPACE/.git/*" \
               -print | sort -V
           )
@@ -40,7 +40,7 @@ jobs:
           sha256sum "$ZIP"
           unzip -q -t "$ZIP"
 
-          INSTALL_ROOT="/tmp/five_project"
+          INSTALL_ROOT="/tmp/hundred_project"
           rm -rf "$INSTALL_ROOT"
           mkdir -p "$INSTALL_ROOT"
           unzip -q -o "$ZIP" -d "$INSTALL_ROOT"
@@ -104,17 +104,14 @@ jobs:
             sed -n 's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' buildozer.spec |
               tail -n 1 | xargs
           )"
-
           PACKAGE_NAME="$(
             sed -n 's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' buildozer.spec |
               tail -n 1 | xargs
           )"
-
           VERSION="$(
             sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
               tail -n 1 | xargs
           )"
-
           NUMERIC_VERSION="$(
             sed -n 's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
               tail -n 1 | xargs
@@ -133,9 +130,9 @@ jobs:
           echo "Version:        $VERSION"
           echo "Version code:   $NUMERIC_VERSION"
 
-          test "$PACKAGE_ID" = "org.selflearningtrader.selflearningtrader"
-          test "$VERSION" = "1.0.158"
-          test "$NUMERIC_VERSION" = "10158"
+          test "$PACKAGE_ID" = "org.selflearningtrader.hundred"
+          test "$VERSION" = "1.0.198"
+          test "$NUMERIC_VERSION" = "10198"
 
           python3 -m compileall -q app
 
@@ -155,13 +152,10 @@ jobs:
               -alias androiddebugkey |
               awk -F': ' '/SHA256:/{print $2; exit}'
           )"
-
           KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
-
           test "$KEY_SHA" = "13:E0:41:41:39:05:CE:30:B0:AA:3E:40:5A:F9:7D:DE:86:2B:0C:3C:FE:DD:DB:8B:66:52:FA:28:D6:68:7F:04"
 
           echo "=== FIXED KEY CERTIFICATE ==="
-
           keytool -list -v \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
@@ -177,11 +171,8 @@ jobs:
           cd "$GITHUB_WORKSPACE"
 
           rm -rf .buildozer bin signed
-
           find . -type d -name '__pycache__' -prune -exec rm -rf {} +
-
-          find . -type f -name '*.pyc' -delete
-          find . -type f -name '*.pyo' -delete
+          find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
       - name: Build Android APK
         shell: bash
@@ -189,7 +180,7 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
 
-          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
           export PATH="$JAVA_HOME/bin:$PATH"
 
           java -version
@@ -206,12 +197,10 @@ jobs:
             find "$HOME/.buildozer" -type f -name apksigner -perm -111 \
               -print 2>/dev/null | sort -V | tail -n 1
           )"
-
           ZIPALIGN="$(
             find "$HOME/.buildozer" -type f -name zipalign -perm -111 \
               -print 2>/dev/null | sort -V | tail -n 1
           )"
-
           AAPT="$(
             find "$HOME/.buildozer" -type f -name aapt -perm -111 \
               -print 2>/dev/null | sort -V | tail -n 1
@@ -221,15 +210,12 @@ jobs:
           test -n "$ZIPALIGN"
           test -n "$AAPT"
 
-          test -x "$APKSIGNER"
-          test -x "$ZIPALIGN"
-          test -x "$AAPT"
-
           echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
           echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
           echo "AAPT=$AAPT" >> "$GITHUB_ENV"
 
           "$APKSIGNER" version
+          "$ZIPALIGN" -h >/dev/null
           "$AAPT" version
 
       - name: Verify build APK package and version
@@ -242,21 +228,14 @@ jobs:
           test -n "$APK"
 
           echo "Build APK: $APK"
-
           BADGING="$("$AAPT" dump badging "$APK")"
-
           printf '%s\n' "$BADGING" | sed -n '1,5p'
 
-          printf '%s\n' "$BADGING" |
-            grep -q "package: name='org.selflearningtrader.selflearningtrader'"
+          printf '%s\n' "$BADGING" | grep -q "package: name='org.selflearningtrader.hundred'"
+          printf '%s\n' "$BADGING" | grep -q "versionCode='10198'"
+          printf '%s\n' "$BADGING" | grep -q "versionName='1.0.198'"
 
-          printf '%s\n' "$BADGING" |
-            grep -q "versionCode='10158'"
-
-          printf '%s\n' "$BADGING" |
-            grep -q "versionName='1.0.158'"
-
-      - name: Align and sign APK with fixed FIVE key
+      - name: Align and sign APK with fixed HUNDRED key
         shell: bash
         run: |
           set -euo pipefail
@@ -268,9 +247,7 @@ jobs:
           rm -rf signed
           mkdir -p signed
 
-          "$ZIPALIGN" -f -p 4 \
-            "$APK" \
-            signed/aligned.apk
+          "$ZIPALIGN" -f -p 4 "$APK" signed/aligned.apk
 
           "$APKSIGNER" sign \
             --ks "$HOME/.android/debug.keystore" \
@@ -309,6 +286,7 @@ jobs:
             --print-certs \
             "$APK" | tee apk-cert.txt
 
+          grep -q "Verified using v1 scheme (JAR signing): true" apk-cert.txt
           grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" apk-cert.txt
           grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" apk-cert.txt
 
@@ -321,30 +299,14 @@ jobs:
           )"
 
           APK_SHA="$(
-            awk '
-              /certificate SHA-256 digest:/ {
-                capture=1
-                sub(/^.*certificate SHA-256 digest:[[:space:]]*/, "")
-                gsub(/[[:space:]]/, "")
-                value=value $0
-                next
-              }
-              capture && /certificate SHA-1 digest:/ {
-                print value
-                exit
-              }
-              capture {
-                gsub(/[[:space:]]/, "")
-                value=value $0
-              }
-            ' apk-cert.txt
+            awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' apk-cert.txt
           )"
 
           test -n "$KEY_SHA"
           test -n "$APK_SHA"
 
-          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
-          APK_SHA="$(echo "$APK_SHA" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          APK_SHA="$(echo "$APK_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
 
           echo "Keystore SHA-256: $KEY_SHA"
           echo "APK SHA-256:      $APK_SHA"
@@ -354,17 +316,10 @@ jobs:
           "$ZIPALIGN" -c -P 4 -v 4 "$APK"
 
           FINAL_BADGING="$("$AAPT" dump badging "$APK")"
-
           printf '%s\n' "$FINAL_BADGING" | sed -n '1,5p'
-
-          printf '%s\n' "$FINAL_BADGING" |
-            grep -q "package: name='org.selflearningtrader.selflearningtrader'"
-
-          printf '%s\n' "$FINAL_BADGING" |
-            grep -q "versionCode='10158'"
-
-          printf '%s\n' "$FINAL_BADGING" |
-            grep -q "versionName='1.0.158'"
+          printf '%s\n' "$FINAL_BADGING" | grep -q "package: name='org.selflearningtrader.hundred'"
+          printf '%s\n' "$FINAL_BADGING" | grep -q "versionCode='10198'"
+          printf '%s\n' "$FINAL_BADGING" | grep -q "versionName='1.0.198'"
 
           echo "FINAL APK VERIFICATION PASSED."
 
@@ -372,7 +327,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SelfLearningTrader-FIVE-build-log
+          name: SelfLearningTrader-HUNDRED-build-log
           path: build.log
           if-no-files-found: warn
 
@@ -380,6 +335,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SelfLearningTrader-FIVE-verified-apk
+          name: SelfLearningTrader-HUNDRED-verified-apk
           path: bin/*.apk
           if-no-files-found: error
