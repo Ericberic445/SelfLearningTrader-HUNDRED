@@ -334,17 +334,17 @@ jobs:
           printf '%s\n' "$BADGING" |
             sed -n '1,5p'
 
-          grep -q \
-            "package: name='${FIVE_PACKAGE_ID}'" \
-            <<< "$BADGING"
+          printf '%s\n' "$BADGING" |
+            grep -q \
+            "package: name='${FIVE_PACKAGE_ID}'"
 
-          grep -q \
-            "versionCode='${FIVE_VERSION_CODE}'" \
-            <<< "$BADGING"
+          printf '%s\n' "$BADGING" |
+            grep -q \
+            "versionCode='${FIVE_VERSION_CODE}'"
 
-          grep -q \
-            "versionName='${FIVE_VERSION}'" \
-            <<< "$BADGING"
+          printf '%s\n' "$BADGING" |
+            grep -q \
+            "versionName='${FIVE_VERSION}'"
 
       - name: Align and sign APK with fixed FIVE key
         shell: bash
@@ -492,17 +492,17 @@ jobs:
           printf '%s\n' "$FINAL_BADGING" |
             sed -n '1,5p'
 
-          grep -q \
-            "package: name='${FIVE_PACKAGE_ID}'" \
-            <<< "$FINAL_BADGING"
+          printf '%s\n' "$FINAL_BADGING" |
+            grep -q \
+            "package: name='${FIVE_PACKAGE_ID}'"
 
-          grep -q \
-            "versionCode='${FIVE_VERSION_CODE}'" \
-            <<< "$FINAL_BADGING"
+          printf '%s\n' "$FINAL_BADGING" |
+            grep -q \
+            "versionCode='${FIVE_VERSION_CODE}'"
 
-          grep -q \
-            "versionName='${FIVE_VERSION}'" \
-            <<< "$FINAL_BADGING"
+          printf '%s\n' "$FINAL_BADGING" |
+            grep -q \
+            "versionName='${FIVE_VERSION}'"
 
           echo "FINAL APK VERIFICATION PASSED."
 
