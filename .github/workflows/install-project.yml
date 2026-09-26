@@ -211,12 +211,15 @@ jobs:
           test -n "$ZIPALIGN"
           test -n "$AAPT"
 
+          test -x "$APKSIGNER"
+          test -x "$ZIPALIGN"
+          test -x "$AAPT"
+
           echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
           echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
           echo "AAPT=$AAPT" >> "$GITHUB_ENV"
 
           "$APKSIGNER" version
-          "$ZIPALIGN" -h >/dev/null
           "$AAPT" version
 
       - name: Verify build APK package and version
