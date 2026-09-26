@@ -1,0 +1,118 @@
+name: Build SelfLearningTrader HUNDRED
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "*.zip"
+      - "**/*.zip"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find and extract project ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="$(find "$GITHUB_WORKSPACE" \
+            -type f \
+            -name 'SelfLearningTrader_HUNDRED_*.zip' \
+            -not -path "$GITHUB_WORKSPACE/.git/*" \
+            -print | sort -V | tail -n 1)"
+
+          test -n "$ZIP"
+
+          echo "Selected ZIP:"
+          echo "$ZIP"
+
+          unzip -q -t "$ZIP"
+
+          INSTALL_ROOT="/tmp/hundred_project"
+          rm -rf "$INSTALL_ROOT"
+          mkdir -p "$INSTALL_ROOT"
+
+          unzip -q -o "$ZIP" -d "$INSTALL_ROOT"
+
+          ROOT="$INSTALL_ROOT"
+
+          mapfile -t TOP < <(
+            find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -print
+          )
+
+          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
+            ROOT="${TOP[0]}"
+          fi
+
+          echo "Project root:"
+          echo "$ROOT"
+
+          test -f "$ROOT/buildozer.spec"
+          test -f "$ROOT/requirements.txt"
+          test -f "$ROOT/app/main.py"
+          test -f "$ROOT/signing/debug.keystore"
+
+          echo "Project extracted successfully."
+
+      - name: Prepare update version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ROOT="/tmp/hundred_project"
+
+          mapfile -t TOP < <(
+            find "$ROOT" -mindepth 1 -maxdepth 1 -print
+          )
+
+          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
+            ROOT="${TOP[0]}"
+          fi
+
+          PACKAGE_DOMAIN="$(
+            sed -n \
+              's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' \
+              "$ROOT/buildozer.spec" |
+              tail -n 1 |
+              xargs
+          )"
+
+          PACKAGE_NAME="$(
+            sed -n \
+              's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' \
+              "$ROOT/buildozer.spec" |
+              tail -n 1 |
+              xargs
+          )"
+
+          VERSION="$(
+            sed -n \
+              's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
+              "$ROOT/buildozer.spec" |
+              tail -n 1 |
+              xargs
+          )"
+
+          VERSION_CODE="$(
+            sed -n \
+              's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
+              "$ROOT/buildozer.spec" |
+              tail -n 1 |
+              xargs
+          )"
+
+          test "$PACKAGE_DOMAIN" = "org.selflearningtrader.hundred"
+          test "$PACKAGE_NAME" = "hundred"
+          test -n "$VERSION"
+          test -n "$VERSION_CODE"
+
+          if [[
