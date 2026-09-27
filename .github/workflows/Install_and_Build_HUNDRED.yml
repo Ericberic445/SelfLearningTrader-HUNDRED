@@ -219,7 +219,7 @@ jobs:
           echo "Java 17 verification PASSED."
 
       # ============================================================
-      # READ PROJECT VERSION AUTOMATICALLY
+      # READ PROJECT INFORMATION AUTOMATICALLY
       # ============================================================
       - name: Verify installed project and fixed signing key
         shell: bash
@@ -364,7 +364,7 @@ jobs:
             -delete
 
       # ============================================================
-      # VERIFY JAVA BEFORE BUILD
+      # VERIFY JAVA
       # ============================================================
       - name: Verify Java before Android build
         shell: bash
@@ -460,9 +460,43 @@ jobs:
           echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
           echo "AAPT=$AAPT" >> "$GITHUB_ENV"
 
+          echo "========================================"
+          echo "ANDROID TOOLS FOUND"
+          echo "========================================"
+
+          echo "apksigner:"
+          echo "$APKSIGNER"
+
+          echo "zipalign:"
+          echo "$ZIPALIGN"
+
+          echo "aapt:"
+          echo "$AAPT"
+
+          echo
+          echo "Checking apksigner..."
           "$APKSIGNER" version
-          "$ZIPALIGN" -h >/dev/null
+
+          echo
+          echo "Checking aapt..."
           "$AAPT" version
+
+          echo
+          echo "Checking zipalign..."
+
+          ZIPALIGN_TEST="$(
+            mktemp \
+              --suffix=.apk
+          )"
+
+          printf 'not-an-apk' > "$ZIPALIGN_TEST"
+
+          "$ZIPALIGN" -c 4 "$ZIPALIGN_TEST" >/dev/null 2>&1 || true
+
+          rm -f "$ZIPALIGN_TEST"
+
+          echo
+          echo "Android signing tools located successfully."
 
       # ============================================================
       # VERIFY BUILD APK
@@ -505,6 +539,7 @@ jobs:
             grep -q \
             "versionName='$HUNDRED_VERSION'"
 
+          echo
           echo "APK package/version verification PASSED."
 
       # ============================================================
