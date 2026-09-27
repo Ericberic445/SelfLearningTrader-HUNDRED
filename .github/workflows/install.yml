@@ -15,12 +15,13 @@ jobs:
     timeout-minutes: 120
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Select the only HUNDRED ZIP
+      - name: Select HUNDRED ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -34,7 +35,7 @@ jobs:
           )
 
           if [ "${#ZIPS[@]}" -ne 1 ]; then
-            echo "ERROR: Repository must contain exactly one SelfLearningTrader_HUNDRED_*.zip"
+            echo "ERROR: Repository must contain exactly ONE HUNDRED ZIP."
             echo "Found: ${#ZIPS[@]}"
             printf '%s\n' "${ZIPS[@]:-<none>}"
             exit 1
@@ -42,33 +43,30 @@ jobs:
 
           ZIP="${ZIPS[0]}"
 
-          echo "Selected ZIP: $ZIP"
+          echo "Selected ZIP:"
+          echo "$ZIP"
 
+          echo "=== ZIP SHA-256 ==="
           sha256sum "$ZIP"
 
+          echo "=== ZIP TEST ==="
           unzip -q -t "$ZIP"
 
           echo "ZIP archive test PASSED."
+
+          echo "SELECTED_ZIP=$ZIP" >> "$GITHUB_ENV"
 
       - name: Extract project only to temporary workspace
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="$(
-            find "$GITHUB_WORKSPACE" \
-              -maxdepth 1 \
-              -type f \
-              -name 'SelfLearningTrader_HUNDRED_*.zip' \
-              -print
-          )"
-
           TEMP_ROOT="/tmp/selflearningtrader_hundred"
 
           rm -rf "$TEMP_ROOT"
           mkdir -p "$TEMP_ROOT"
 
-          unzip -q -o "$ZIP" -d "$TEMP_ROOT"
+          unzip -q -o "$SELECTED_ZIP" -d "$TEMP_ROOT"
 
           ROOT="$TEMP_ROOT"
 
@@ -83,6 +81,9 @@ jobs:
             ROOT="${TOP[0]}"
           fi
 
+          echo "Temporary project root:"
+          echo "$ROOT"
+
           test -f "$ROOT/buildozer.spec"
           test -f "$ROOT/requirements.txt"
           test -f "$ROOT/app/main.py"
@@ -90,25 +91,17 @@ jobs:
 
           echo "TEMP_PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
 
-          echo "Temporary project:"
-          echo "$ROOT"
+          echo "Temporary project verification PASSED."
 
-      - name: Set version from ZIP filename
+      - name: Detect version from ZIP filename
         shell: bash
         run: |
           set -euo pipefail
 
-          cd "$TEMP_PROJECT_ROOT"
+          ZIP_NAME="$(basename "$SELECTED_ZIP")"
 
-          ZIP_NAME="$(
-            basename "$(
-              find "$GITHUB_WORKSPACE" \
-                -maxdepth 1 \
-                -type f \
-                -name 'SelfLearningTrader_HUNDRED_*.zip' \
-                -print
-            )"
-          )"
+          echo "ZIP filename:"
+          echo "$ZIP_NAME"
 
           VERSION="$(
             printf '%s\n' "$ZIP_NAME" |
@@ -116,40 +109,66 @@ jobs:
               's/^SelfLearningTrader_HUNDRED_\([0-9]\+\.[0-9]\+\.[0-9]\+\).*$/\1/p'
           )"
 
-          test -n "$VERSION"
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: Could not detect version from ZIP filename."
+            echo "Expected format:"
+            echo "SelfLearningTrader_HUNDRED_1.0.203_....zip"
+            exit 1
+          fi
 
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
+          if ! [[ "$MAJOR" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Invalid major version."
+            exit 1
+          fi
+
+          if ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Invalid minor version."
+            exit 1
+          fi
+
+          if ! [[ "$PATCH" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Invalid patch version."
+            exit 1
+          fi
+
           NUMERIC_VERSION=$(
-            (
-              10#$MAJOR * 10000 +
-              10#$MINOR * 100 +
-              10#$PATCH
-            )
+            echo "$((10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH))"
           )
 
-          test "$NUMERIC_VERSION" -ge 10203
+          if [ "$NUMERIC_VERSION" -lt 10203 ]; then
+            echo "ERROR: Version is older than 1.0.203."
+            echo "Detected: $VERSION"
+            echo "Version code: $NUMERIC_VERSION"
+            exit 1
+          fi
 
-          echo "ZIP version: $VERSION"
-          echo "APK version code: $NUMERIC_VERSION"
+          echo "Detected version: $VERSION"
+          echo "Detected numeric version: $NUMERIC_VERSION"
+
+          cd "$TEMP_PROJECT_ROOT"
 
           sed -i \
             -E \
-            "s/^version[[:space:]]*=.*/version = $VERSION/" \
+            "s/^[[:space:]]*version[[:space:]]*=.*/version = $VERSION/" \
             buildozer.spec
 
           sed -i \
             -E \
-            "s/^android\.numeric_version[[:space:]]*=.*/android.numeric_version = $NUMERIC_VERSION/" \
+            "s/^[[:space:]]*android\.numeric_version[[:space:]]*=.*/android.numeric_version = $NUMERIC_VERSION/" \
             buildozer.spec
 
-          echo "=== FINAL BUILD VERSION ==="
+          echo "BUILD_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_VERSION_CODE=$NUMERIC_VERSION" >> "$GITHUB_ENV"
+
+          echo "=== BUILD VERSION ==="
 
           grep -E \
-            '^(version|android.numeric_version)[[:space:]]*=' \
+            '^[[:space:]]*(version|android.numeric_version)[[:space:]]*=' \
             buildozer.spec
 
-      - name: Install Java 17 and Android build dependencies
+      - name: Install Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -163,12 +182,35 @@ jobs:
           sudo apt-get update
 
           sudo apt-get install -y \
-            ant autoconf automake autopoint ccache cmake \
-            g++ gcc gettext git lbzip2 \
-            libffi-dev libltdl-dev libncurses5-dev libncursesw5-dev \
-            libssl-dev libtool make patch pkg-config \
-            python3 python3-dev python3-pip python3-venv \
-            rsync unzip wget zip zlib1g-dev
+            ant \
+            autoconf \
+            automake \
+            autopoint \
+            ccache \
+            cmake \
+            g++ \
+            gcc \
+            gettext \
+            git \
+            lbzip2 \
+            libffi-dev \
+            libltdl-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libssl-dev \
+            libtool \
+            make \
+            patch \
+            pkg-config \
+            python3 \
+            python3-dev \
+            python3-pip \
+            python3-venv \
+            rsync \
+            unzip \
+            wget \
+            zip \
+            zlib1g-dev
 
           python3 -m pip install --upgrade pip
 
@@ -189,11 +231,17 @@ jobs:
           echo "$JAVA_VERSION"
           echo "$JAVAC_VERSION"
 
-          printf '%s\n' "$JAVA_VERSION" |
-            grep -qE 'version "17\.'
+          if ! printf '%s\n' "$JAVA_VERSION" |
+            grep -qE 'version "17\.'; then
+            echo "ERROR: Java 17 is not active."
+            exit 1
+          fi
 
-          printf '%s\n' "$JAVAC_VERSION" |
-            grep -qE '^javac 17\.'
+          if ! printf '%s\n' "$JAVAC_VERSION" |
+            grep -qE '^javac 17\.'; then
+            echo "ERROR: javac 17 is not active."
+            exit 1
+          fi
 
           echo "Java 17 verification PASSED."
 
@@ -233,7 +281,7 @@ jobs:
             xargs
           )"
 
-          NUMERIC_VERSION="$(
+          VERSION_CODE="$(
             sed -n \
               's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
@@ -241,25 +289,28 @@ jobs:
             xargs
           )"
 
-          test "$PACKAGE_DOMAIN" = "org.selflearningtrader"
-          test "$PACKAGE_NAME" = "hundred"
-          test "$VERSION" = "1.0.203"
-          test "$NUMERIC_VERSION" = "10203"
-
           PACKAGE_ID="${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
 
           echo "Package ID: $PACKAGE_ID"
           echo "Version: $VERSION"
-          echo "Version code: $NUMERIC_VERSION"
+          echo "Version code: $VERSION_CODE"
+
+          test "$PACKAGE_ID" = "org.selflearningtrader.hundred"
+          test "$VERSION" = "$BUILD_VERSION"
+          test "$VERSION_CODE" = "$BUILD_VERSION_CODE"
 
           python3 -m compileall -q app
 
           mkdir -p "$HOME/.android"
 
-          cp signing/debug.keystore \
+          cp \
+            signing/debug.keystore \
             "$HOME/.android/debug.keystore"
 
-          chmod 600 "$HOME/.android/debug.keystore"
+          chmod 600 \
+            "$HOME/.android/debug.keystore"
+
+          echo "=== SIGNING KEY ==="
 
           keytool -list \
             -keystore "$HOME/.android/debug.keystore" \
@@ -275,7 +326,10 @@ jobs:
 
           cd "$TEMP_PROJECT_ROOT"
 
-          rm -rf .buildozer bin signed
+          rm -rf \
+            .buildozer \
+            bin \
+            signed
 
           find . \
             -type d \
@@ -288,6 +342,8 @@ jobs:
             \( -name '*.pyc' -o -name '*.pyo' \) \
             -delete
 
+          echo "Temporary Android state cleaned."
+
       - name: Build Android APK
         shell: bash
         run: |
@@ -295,8 +351,10 @@ jobs:
 
           cd "$TEMP_PROJECT_ROOT"
 
-          echo "Building from temporary directory:"
-          pwd
+          echo "=== BUILD START ==="
+          echo "Project: $PWD"
+          echo "Version: $BUILD_VERSION"
+          echo "Version code: $BUILD_VERSION_CODE"
 
           java -version
           javac -version
@@ -351,6 +409,10 @@ jobs:
           echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
           echo "AAPT=$AAPT" >> "$GITHUB_ENV"
 
+          echo "apksigner: $APKSIGNER"
+          echo "zipalign: $ZIPALIGN"
+          echo "aapt: $AAPT"
+
           "$APKSIGNER" version
           "$AAPT" version
 
@@ -368,11 +430,18 @@ jobs:
               -print
           )
 
-          test "${#APKS[@]}" -eq 1
+          if [ "${#APKS[@]}" -ne 1 ]; then
+            echo "ERROR: Expected exactly one generated APK."
+            echo "Found: ${#APKS[@]}"
+            printf '%s\n' "${APKS[@]:-<none>}"
+            exit 1
+          fi
 
           APK="${APKS[0]}"
 
-          echo "Generated APK: $APK"
+          echo "Generated APK:"
+          echo "$APK"
+
           ls -lh "$APK"
 
           BADGING="$("$AAPT" dump badging "$APK")"
@@ -383,17 +452,29 @@ jobs:
             grep -q \
             "package: name='org.selflearningtrader.hundred'"
 
-          printf '%s\n' "$BADGING" |
-            grep -q \
-            "versionCode='10203'"
+          APK_VERSION="$(
+            printf '%s\n' "$BADGING" |
+            sed -n \
+              "s/.*versionName='\([^']*\)'.*/\1/p" |
+            head -n 1
+          )"
 
-          printf '%s\n' "$BADGING" |
-            grep -q \
-            "versionName='1.0.203'"
+          APK_VERSION_CODE="$(
+            printf '%s\n' "$BADGING" |
+            sed -n \
+              "s/.*versionCode='\([^']*\)'.*/\1/p" |
+            head -n 1
+          )"
+
+          echo "APK version: $APK_VERSION"
+          echo "APK version code: $APK_VERSION_CODE"
+
+          test "$APK_VERSION" = "$BUILD_VERSION"
+          test "$APK_VERSION_CODE" = "$BUILD_VERSION_CODE"
 
           echo "Generated APK identity PASSED."
 
-      - name: Align and sign with permanent project key
+      - name: Align and sign APK
         shell: bash
         run: |
           set -euo pipefail
@@ -407,12 +488,20 @@ jobs:
               -print
           )"
 
+          test -f "$APK"
+
           rm -rf signed
           mkdir -p signed
+
+          echo "=== ZIPALIGN ==="
 
           "$ZIPALIGN" -f -p 4 \
             "$APK" \
             signed/aligned.apk
+
+          test -f signed/aligned.apk
+
+          echo "=== SIGN APK ==="
 
           "$APKSIGNER" sign \
             --ks "$HOME/.android/debug.keystore" \
@@ -426,15 +515,16 @@ jobs:
             --out signed/final.apk \
             signed/aligned.apk
 
+          test -f signed/final.apk
+
+          echo "=== IMMEDIATE SIGNATURE CHECK ==="
+
           "$APKSIGNER" verify \
             --verbose \
             --print-certs \
             signed/final.apk
 
-          cp signed/final.apk \
-            "$GITHUB_WORKSPACE/SelfLearningTrader-HUNDRED-1.0.203.apk"
-
-          echo "SIGNED_APK=$GITHUB_WORKSPACE/SelfLearningTrader-HUNDRED-1.0.203.apk" \
+          echo "SIGNED_APK=$TEMP_PROJECT_ROOT/signed/final.apk" \
             >> "$GITHUB_ENV"
 
       - name: Final APK verification
@@ -445,6 +535,8 @@ jobs:
           APK="$SIGNED_APK"
 
           test -f "$APK"
+
+          echo "=== APK SIGNATURE VERIFICATION ==="
 
           "$APKSIGNER" verify \
             --verbose \
@@ -463,6 +555,10 @@ jobs:
           grep -q \
             "Verified using v3 scheme (APK Signature Scheme v3): true" \
             "$GITHUB_WORKSPACE/apk-cert.txt"
+
+          echo "APK signature schemes PASSED."
+
+          echo "=== CERTIFICATE SHA-256 ==="
 
           KEY_SHA="$(
             keytool -list -v \
@@ -499,12 +595,30 @@ jobs:
           test -n "$KEY_SHA"
           test -n "$APK_SHA"
 
-          echo "Keystore SHA-256: $KEY_SHA"
-          echo "APK SHA-256:      $APK_SHA"
+          echo "Keystore SHA-256:"
+          echo "$KEY_SHA"
 
-          test "$KEY_SHA" = "$APK_SHA"
+          echo "APK SHA-256:"
+          echo "$APK_SHA"
 
-          "$ZIPALIGN" -c -P 4 -v 4 "$APK"
+          if [ "$KEY_SHA" != "$APK_SHA" ]; then
+            echo "ERROR: APK certificate does not match project signing key."
+            exit 1
+          fi
+
+          echo "Signing key MATCHED."
+
+          echo "=== ZIPALIGN CHECK ==="
+
+          "$ZIPALIGN" \
+            -c \
+            -P 4 \
+            -v 4 \
+            "$APK"
+
+          echo "ZIPALIGN PASSED."
+
+          echo "=== FINAL PACKAGE CHECK ==="
 
           FINAL_BADGING="$("$AAPT" dump badging "$APK")"
 
@@ -512,33 +626,45 @@ jobs:
             grep -q \
             "package: name='org.selflearningtrader.hundred'"
 
-          printf '%s\n' "$FINAL_BADGING" |
-            grep -q \
-            "versionCode='10203'"
+          FINAL_VERSION="$(
+            printf '%s\n' "$FINAL_BADGING" |
+            sed -n \
+              "s/.*versionName='\([^']*\)'.*/\1/p" |
+            head -n 1
+          )"
 
-          printf '%s\n' "$FINAL_BADGING" |
-            grep -q \
-            "versionName='1.0.203'"
+          FINAL_VERSION_CODE="$(
+            printf '%s\n' "$FINAL_BADGING" |
+            sed -n \
+              "s/.*versionCode='\([^']*\)'.*/\1/p" |
+            head -n 1
+          )"
+
+          echo "Final version: $FINAL_VERSION"
+          echo "Final version code: $FINAL_VERSION_CODE"
+
+          test "$FINAL_VERSION" = "$BUILD_VERSION"
+          test "$FINAL_VERSION_CODE" = "$BUILD_VERSION_CODE"
 
           echo "========================================"
           echo "FINAL APK VERIFICATION PASSED"
           echo "Package: org.selflearningtrader.hundred"
-          echo "Version: 1.0.203"
-          echo "Version code: 10203"
-          echo "Signing certificate matches project key"
-          echo "ZIP alignment PASSED"
+          echo "Version: $FINAL_VERSION"
+          echo "Version code: $FINAL_VERSION_CODE"
+          echo "Signing key: MATCHED"
+          echo "ZIP alignment: PASSED"
           echo "========================================"
 
-      - name: Upload final APK only
+      - name: Upload final APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SelfLearningTrader-HUNDRED-1.0.203
-          path: SelfLearningTrader-HUNDRED-1.0.203.apk
+          name: SelfLearningTrader-HUNDRED-${{ env.BUILD_VERSION }}
+          path: ${{ env.SIGNED_APK }}
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload build log only on failure
+      - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -547,7 +673,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Remove temporary build files
+      - name: Remove temporary files
         if: always()
         shell: bash
         run: |
@@ -557,6 +683,5 @@ jobs:
 
           rm -f "$GITHUB_WORKSPACE/build.log"
           rm -f "$GITHUB_WORKSPACE/apk-cert.txt"
-          rm -f "$GITHUB_WORKSPACE/SelfLearningTrader-HUNDRED-1.0.203.apk"
 
-          echo "Temporary build files removed."
+          echo "Temporary files removed."
