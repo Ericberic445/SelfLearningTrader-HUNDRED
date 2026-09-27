@@ -16,13 +16,28 @@ jobs:
     timeout-minutes: 120
 
     steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       # ============================================================
-      # FIND ANY HUNDRED ZIP AND INSTALL IT
+      # JAVA 17
+      # ============================================================
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      # ============================================================
+      # FIND AND EXTRACT THE NEWEST HUNDRED ZIP
+      # VERSION NUMBER IS NOT HARDCODED
       # ============================================================
       - name: Select and extract HUNDRED ZIP
         shell: bash
@@ -30,12 +45,13 @@ jobs:
           set -euo pipefail
 
           mapfile -t ZIPS < <(
-            find "$GITHUB_WORKSPACE" -type f \
+            find "$GITHUB_WORKSPACE" \
+              -type f \
               -name 'SelfLearningTrader_HUNDRED_*.zip' \
               -not -path "$GITHUB_WORKSPACE/.git/*" \
               -printf '%T@ %p\n' |
-              sort -nr |
-              sed 's/^[^ ]* //' 
+            sort -nr |
+            sed 's/^[^ ]* //'
           )
 
           if [ "${#ZIPS[@]}" -eq 0 ]; then
@@ -43,16 +59,21 @@ jobs:
             exit 1
           fi
 
-          # Берём самый свежий ZIP.
           ZIP="${ZIPS[0]}"
 
-          echo "Selected ZIP:"
+          echo "========================================"
+          echo "SELECTED HUNDRED ZIP"
+          echo "========================================"
           echo "$ZIP"
+          echo
 
           sha256sum "$ZIP"
+
+          echo "Checking ZIP..."
           unzip -q -t "$ZIP"
 
           INSTALL_ROOT="/tmp/hundred_project"
+
           rm -rf "$INSTALL_ROOT"
           mkdir -p "$INSTALL_ROOT"
 
@@ -61,7 +82,10 @@ jobs:
           ROOT="$INSTALL_ROOT"
 
           mapfile -t TOP < <(
-            find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -print
+            find "$INSTALL_ROOT" \
+              -mindepth 1 \
+              -maxdepth 1 \
+              -print
           )
 
           if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
@@ -84,13 +108,17 @@ jobs:
           test -f app/main.py
           test -f signing/debug.keystore
 
-          echo "=== INSTALLED PROJECT ==="
+          echo
+          echo "========================================"
+          echo "INSTALLED PROJECT"
+          echo "========================================"
+
           grep -E \
             '^[[:space:]]*(package.name|package.domain|version|android.numeric_version)[[:space:]]*=' \
-            buildozer.spec
+            buildozer.spec || true
 
       # ============================================================
-      # INSTALL BUILD DEPENDENCIES
+      # INSTALL SYSTEM DEPENDENCIES
       # ============================================================
       - name: Install Android build dependencies
         shell: bash
@@ -100,23 +128,102 @@ jobs:
           sudo apt-get update
 
           sudo apt-get install -y \
-            ant autoconf automake autopoint ccache cmake \
-            g++ gcc gettext git lbzip2 \
-            libffi-dev libltdl-dev libncurses5-dev libncursesw5-dev \
-            libssl-dev libtool make openjdk-17-jdk patch pkg-config \
-            python3 python3-dev python3-pip python3-venv rsync \
-            unzip wget zip zlib1g-dev
+            ant \
+            autoconf \
+            automake \
+            autopoint \
+            ccache \
+            cmake \
+            g++ \
+            gcc \
+            gettext \
+            git \
+            lbzip2 \
+            libffi-dev \
+            libltdl-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libssl-dev \
+            libtool \
+            make \
+            openjdk-17-jdk \
+            patch \
+            pkg-config \
+            python3 \
+            python3-dev \
+            python3-pip \
+            python3-venv \
+            rsync \
+            unzip \
+            wget \
+            zip \
+            zlib1g-dev
 
           python3 -m pip install --upgrade pip
+
           python3 -m pip install \
             "cython==3.0.12" \
             "buildozer==1.5.0"
 
       # ============================================================
-      # READ VERSION AUTOMATICALLY
-      # NOTHING IS HARDCODED HERE
+      # FORCE JAVA 17
       # ============================================================
-      - name: Verify installed project and signing key
+      - name: Force Java 17
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          JAVA17=""
+
+          for J in \
+            "/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17"/*/x64 \
+            "/usr/lib/jvm/temurin-17-jdk-amd64" \
+            "/usr/lib/jvm/java-17-openjdk-amd64"
+          do
+            if [ -x "$J/bin/java" ]; then
+              JAVA17="$J"
+              break
+            fi
+          done
+
+          if [ -z "$JAVA17" ]; then
+            echo "ERROR: Java 17 installation was not found."
+            exit 1
+          fi
+
+          echo "Using Java 17:"
+          echo "$JAVA17"
+
+          echo "JAVA_HOME=$JAVA17" >> "$GITHUB_ENV"
+          echo "$JAVA17/bin" >> "$GITHUB_PATH"
+
+          export JAVA_HOME="$JAVA17"
+          export PATH="$JAVA_HOME/bin:$PATH"
+
+          echo
+          echo "JAVA_HOME=$JAVA_HOME"
+
+          java -version
+          javac -version
+
+          JAVA_MAJOR="$(
+            java -version 2>&1 |
+            sed -n 's/.*version "\([0-9]*\).*/\1/p' |
+            head -n 1
+          )"
+
+          if [ "$JAVA_MAJOR" != "17" ]; then
+            echo "ERROR: Java 17 is required."
+            echo "Detected Java: $JAVA_MAJOR"
+            exit 1
+          fi
+
+          echo "Java 17 verification PASSED."
+
+      # ============================================================
+      # READ VERSION AUTOMATICALLY FROM BUILDOZER.SPEC
+      # ============================================================
+      - name: Verify installed project and fixed signing key
         shell: bash
         run: |
           set -euo pipefail
@@ -132,32 +239,32 @@ jobs:
             sed -n \
               's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
-              tail -n 1 |
-              xargs
+            tail -n 1 |
+            xargs
           )"
 
           PACKAGE_NAME="$(
             sed -n \
               's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
-              tail -n 1 |
-              xargs
+            tail -n 1 |
+            xargs
           )"
 
           VERSION="$(
             sed -n \
               's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
-              tail -n 1 |
-              xargs
+            tail -n 1 |
+            xargs
           )"
 
           NUMERIC_VERSION="$(
             sed -n \
               's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
-              tail -n 1 |
-              xargs
+            tail -n 1 |
+            xargs
           )"
 
           test -n "$PACKAGE_DOMAIN"
@@ -167,27 +274,42 @@ jobs:
 
           PACKAGE_ID="${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
 
-          echo "Package domain: $PACKAGE_DOMAIN"
-          echo "Package name:   $PACKAGE_NAME"
-          echo "Package ID:     $PACKAGE_ID"
-          echo "Version:        $VERSION"
-          echo "Version code:   $NUMERIC_VERSION"
+          echo
+          echo "========================================"
+          echo "PROJECT INFORMATION"
+          echo "========================================"
+          echo "Package domain : $PACKAGE_DOMAIN"
+          echo "Package name   : $PACKAGE_NAME"
+          echo "Package ID     : $PACKAGE_ID"
+          echo "Version        : $VERSION"
+          echo "Version code   : $NUMERIC_VERSION"
+          echo "========================================"
 
-          # HUNDRED package ID остаётся постоянным.
+          # Package ID HUNDRED is constant.
+          # Version and version code are NOT constant.
           test "$PACKAGE_ID" = "org.selflearningtrader.hundred"
 
-          # Передаём найденные значения во все следующие steps.
           {
             echo "HUNDRED_PACKAGE_ID=$PACKAGE_ID"
             echo "HUNDRED_VERSION=$VERSION"
             echo "HUNDRED_VERSION_CODE=$NUMERIC_VERSION"
           } >> "$GITHUB_ENV"
 
+          echo
+          echo "Python syntax check..."
+
           python3 -m compileall -q app
+
+          echo "Python syntax check PASSED."
+
+          # ========================================================
+          # INSTALL FIXED DEBUG KEY
+          # ========================================================
 
           mkdir -p "$HOME/.android"
 
-          cp signing/debug.keystore \
+          cp \
+            signing/debug.keystore \
             "$HOME/.android/debug.keystore"
 
           chmod 600 \
@@ -203,7 +325,7 @@ jobs:
               -keystore "$HOME/.android/debug.keystore" \
               -storepass android \
               -alias androiddebugkey |
-              awk -F': ' '/SHA256:/{print $2; exit}'
+            awk -F': ' '/SHA256:/{print $2; exit}'
           )"
 
           KEY_SHA="$(
@@ -212,22 +334,17 @@ jobs:
             tr '[:lower:]' '[:upper:]'
           )"
 
-          # Проверяем только сам ключ, без привязки к версии приложения.
+          echo
+          echo "Signing key SHA-256:"
+          echo "$KEY_SHA"
+
           test "$KEY_SHA" = \
             "13:E0:41:41:39:05:CE:30:B0:AA:3E:40:5A:F9:7D:DE:86:2B:0C:3C:FE:DD:DB:8B:66:52:FA:28:D6:68:7F:04"
 
-          echo "=== FIXED KEY CERTIFICATE ==="
-
-          keytool -list -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey |
-            grep -E 'Owner:|SHA256:'
-
-          echo "Installed project and signing-key verification passed."
+          echo "Signing key verification PASSED."
 
       # ============================================================
-      # CLEAN
+      # CLEAN BUILD
       # ============================================================
       - name: Clean Android build state
         shell: bash
@@ -236,7 +353,10 @@ jobs:
 
           cd "$GITHUB_WORKSPACE"
 
-          rm -rf .buildozer bin signed
+          rm -rf \
+            .buildozer \
+            bin \
+            signed
 
           find . \
             -type d \
@@ -250,7 +370,31 @@ jobs:
             -delete
 
       # ============================================================
-      # BUILD
+      # FINAL JAVA CHECK BEFORE BUILDOZER
+      # ============================================================
+      - name: Verify Java before Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "JAVA_HOME=$JAVA_HOME"
+
+          which java
+          which javac
+
+          java -version
+          javac -version
+
+          JAVA_MAJOR="$(
+            java -version 2>&1 |
+            sed -n 's/.*version "\([0-9]*\).*/\1/p' |
+            head -n 1
+          )"
+
+          test "$JAVA_MAJOR" = "17"
+
+      # ============================================================
+      # BUILD ANDROID APK
       # ============================================================
       - name: Build Android APK
         shell: bash
@@ -259,12 +403,14 @@ jobs:
 
           cd "$GITHUB_WORKSPACE"
 
-          export JAVA_HOME="$(
-            dirname \
-            "$(dirname "$(readlink -f "$(command -v javac)")")"
-          )"
-
+          export JAVA_HOME="$JAVA_HOME"
           export PATH="$JAVA_HOME/bin:$PATH"
+
+          echo "========================================"
+          echo "ANDROID BUILD"
+          echo "========================================"
+
+          echo "JAVA_HOME=$JAVA_HOME"
 
           java -version
           javac -version
@@ -272,7 +418,7 @@ jobs:
           buildozer -v android debug 2>&1 | tee build.log
 
       # ============================================================
-      # FIND ANDROID TOOLS
+      # LOCATE ANDROID SIGNING TOOLS
       # ============================================================
       - name: Locate Android signing tools
         shell: bash
@@ -322,8 +468,7 @@ jobs:
           "$AAPT" version
 
       # ============================================================
-      # VERIFY APK
-      # VERSION IS TAKEN AUTOMATICALLY FROM BUILDOSER.SPEC
+      # VERIFY APK PACKAGE AND AUTOMATIC VERSION
       # ============================================================
       - name: Verify build APK package and version
         shell: bash
@@ -342,10 +487,13 @@ jobs:
 
           test -n "$APK"
 
-          echo "Build APK: $APK"
+          echo "APK:"
+          echo "$APK"
 
           BADGING="$("$AAPT" dump badging "$APK")"
 
+          echo
+          echo "APK BADGING:"
           printf '%s\n' "$BADGING" | sed -n '1,5p'
 
           printf '%s\n' "$BADGING" |
@@ -360,8 +508,11 @@ jobs:
             grep -q \
             "versionName='$HUNDRED_VERSION'"
 
+          echo
+          echo "APK package/version verification PASSED."
+
       # ============================================================
-      # ALIGN AND SIGN
+      # ALIGN AND SIGN WITH FIXED HUNDRED KEY
       # ============================================================
       - name: Align and sign APK with fixed HUNDRED key
         shell: bash
@@ -411,7 +562,7 @@ jobs:
           cp signed/final.apk bin/
 
       # ============================================================
-      # FINAL VERIFICATION
+      # FINAL APK VERIFICATION
       # ============================================================
       - name: Verify final APK identity alignment and certificate
         shell: bash
@@ -430,14 +581,17 @@ jobs:
 
           test -n "$APK"
 
-          echo "=== FINAL APK ==="
+          echo "========================================"
+          echo "FINAL APK"
+          echo "========================================"
+
           ls -lh "$APK"
 
           "$APKSIGNER" verify \
             --verbose \
             --print-certs \
             "$APK" |
-            tee apk-cert.txt
+          tee apk-cert.txt
 
           grep -q \
             "Verified using v1 scheme (JAR signing): true" \
@@ -456,7 +610,7 @@ jobs:
               -keystore "$HOME/.android/debug.keystore" \
               -storepass android \
               -alias androiddebugkey |
-              awk -F': ' '/SHA256:/{print $2; exit}'
+            awk -F': ' '/SHA256:/{print $2; exit}'
           )"
 
           APK_SHA="$(
@@ -480,8 +634,13 @@ jobs:
             tr '[:lower:]' '[:upper:]'
           )"
 
-          echo "Keystore SHA-256: $KEY_SHA"
-          echo "APK SHA-256:      $APK_SHA"
+          echo
+          echo "Keystore SHA-256:"
+          echo "$KEY_SHA"
+
+          echo
+          echo "APK SHA-256:"
+          echo "$APK_SHA"
 
           test "$KEY_SHA" = "$APK_SHA"
 
@@ -493,8 +652,9 @@ jobs:
 
           FINAL_BADGING="$("$AAPT" dump badging "$APK")"
 
-          printf '%s\n' "$FINAL_BADGING" |
-            sed -n '1,5p'
+          echo
+          echo "FINAL APK BADGING:"
+          printf '%s\n' "$FINAL_BADGING" | sed -n '1,5p'
 
           printf '%s\n' "$FINAL_BADGING" |
             grep -q \
@@ -508,10 +668,13 @@ jobs:
             grep -q \
             "versionName='$HUNDRED_VERSION'"
 
-          echo "FINAL APK VERIFICATION PASSED."
+          echo
+          echo "========================================"
+          echo "FINAL APK VERIFICATION PASSED"
+          echo "========================================"
 
       # ============================================================
-      # UPLOAD LOG
+      # BUILD LOG
       # ============================================================
       - name: Upload build log
         if: always()
@@ -522,7 +685,7 @@ jobs:
           if-no-files-found: warn
 
       # ============================================================
-      # UPLOAD APK
+      # FINAL APK
       # ============================================================
       - name: Upload final verified APK
         if: success()
