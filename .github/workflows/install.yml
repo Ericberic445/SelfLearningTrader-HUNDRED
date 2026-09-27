@@ -111,8 +111,6 @@ jobs:
 
           if [ -z "$VERSION" ]; then
             echo "ERROR: Could not detect version from ZIP filename."
-            echo "Expected format:"
-            echo "SelfLearningTrader_HUNDRED_1.0.203_....zip"
             exit 1
           fi
 
@@ -139,8 +137,6 @@ jobs:
 
           if [ "$NUMERIC_VERSION" -lt 10203 ]; then
             echo "ERROR: Version is older than 1.0.203."
-            echo "Detected: $VERSION"
-            echo "Version code: $NUMERIC_VERSION"
             exit 1
           fi
 
@@ -342,8 +338,6 @@ jobs:
             \( -name '*.pyc' -o -name '*.pyo' \) \
             -delete
 
-          echo "Temporary Android state cleaned."
-
       - name: Build Android APK
         shell: bash
         run: |
@@ -409,10 +403,6 @@ jobs:
           echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
           echo "AAPT=$AAPT" >> "$GITHUB_ENV"
 
-          echo "apksigner: $APKSIGNER"
-          echo "zipalign: $ZIPALIGN"
-          echo "aapt: $AAPT"
-
           "$APKSIGNER" version
           "$AAPT" version
 
@@ -432,8 +422,6 @@ jobs:
 
           if [ "${#APKS[@]}" -ne 1 ]; then
             echo "ERROR: Expected exactly one generated APK."
-            echo "Found: ${#APKS[@]}"
-            printf '%s\n' "${APKS[@]:-<none>}"
             exit 1
           fi
 
@@ -580,15 +568,18 @@ jobs:
             ' "$GITHUB_WORKSPACE/apk-cert.txt"
           )"
 
+          # keytool: 13:E0:41:41:...
+          # apksigner: 13e0414139...
+          # Убираем и пробелы, и двоеточия.
           KEY_SHA="$(
             printf '%s' "$KEY_SHA" |
-            tr -d '[:space:]' |
+            tr -d '[:space:]:' |
             tr '[:lower:]' '[:upper:]'
           )"
 
           APK_SHA="$(
             printf '%s' "$APK_SHA" |
-            tr -d '[:space:]' |
+            tr -d '[:space:]:' |
             tr '[:lower:]' '[:upper:]'
           )"
 
