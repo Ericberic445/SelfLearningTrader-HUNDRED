@@ -24,7 +24,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t ZIPS < <(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'SelfLearningTrader_HUNDRED_*.zip' -print)
+
+          mapfile -t ZIPS < <(
+            find "$GITHUB_WORKSPACE" \
+              -maxdepth 1 \
+              -type f \
+              -name 'SelfLearningTrader_HUNDRED_*.zip' \
+              -print
+          )
 
           if [ "${#ZIPS[@]}" -ne 1 ]; then
             echo "ERROR: Repository must contain exactly ONE HUNDRED ZIP."
@@ -58,7 +65,10 @@ jobs:
           ROOT="$TEMP_ROOT"
 
           mapfile -t TOP < <(
-            find "$TEMP_ROOT" -mindepth 1 -maxdepth 1 -print
+            find "$TEMP_ROOT" \
+              -mindepth 1 \
+              -maxdepth 1 \
+              -print
           )
 
           if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
@@ -403,15 +413,19 @@ jobs:
           "$APKSIGNER" verify \
             --verbose \
             --print-certs \
-            "$APK"
+            "$APK" |
+            tee "$GITHUB_WORKSPACE/apk-cert.txt"
 
           echo "=== KEYSTORE CERTIFICATE ==="
 
-          keytool -list -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey |
-            tee "$GITHUB_WORKSPACE/keystore-cert.txt"
+          KEYTOOL_OUTPUT="$(
+            keytool -list -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey
+          )"
+
+          printf '%s\n' "$KEYTOOL_OUTPUT"
 
           echo "=== APK PACKAGE / VERSION ==="
 
@@ -443,31 +457,25 @@ jobs:
           echo "=== CERTIFICATE SHA-256 COMPARISON ==="
 
           KEY_SHA="$(
-            keytool -list -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey |
+            printf '%s\n' "$KEYTOOL_OUTPUT" |
             awk -F': ' '
               /^[[:space:]]*SHA256:/ {
-                gsub(/[[:space:]:]/, "", $2)
-                print toupper($2)
+                print $2
                 exit
               }
             '
           )"
 
           APK_SHA="$(
-            "$APKSIGNER" verify \
-              --print-certs \
-              "$APK" 2>&1 |
             awk '
               /certificate SHA-256 digest:/ {
-                getline
-                gsub(/[[:space:]:]/, "", $0)
-                print toupper($0)
+                if (getline line > 0) {
+                  gsub(/[^0-9A-Fa-f]/, "", line)
+                  print toupper(line)
+                }
                 exit
               }
-            '
+            ' "$GITHUB_WORKSPACE/apk-cert.txt"
           )"
 
           KEY_SHA="$(
