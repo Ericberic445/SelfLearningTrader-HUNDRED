@@ -15,7 +15,6 @@ jobs:
     timeout-minutes: 120
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -25,144 +24,64 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          mapfile -t ZIPS < <(
-            find "$GITHUB_WORKSPACE" \
-              -maxdepth 1 \
-              -type f \
-              -name 'SelfLearningTrader_HUNDRED_*.zip' \
-              -print
-          )
-
+          mapfile -t ZIPS < <(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'SelfLearningTrader_HUNDRED_*.zip' -print)
           if [ "${#ZIPS[@]}" -ne 1 ]; then
             echo "ERROR: Repository must contain exactly ONE HUNDRED ZIP."
             echo "Found: ${#ZIPS[@]}"
             printf '%s\n' "${ZIPS[@]:-<none>}"
             exit 1
           fi
-
           ZIP="${ZIPS[0]}"
-
-          echo "Selected ZIP:"
-          echo "$ZIP"
-
-          echo "=== ZIP SHA-256 ==="
+          echo "Selected ZIP: $ZIP"
           sha256sum "$ZIP"
-
-          echo "=== ZIP TEST ==="
           unzip -q -t "$ZIP"
-
           echo "ZIP archive test PASSED."
-
           echo "SELECTED_ZIP=$ZIP" >> "$GITHUB_ENV"
 
       - name: Extract project only to temporary workspace
         shell: bash
         run: |
           set -euo pipefail
-
           TEMP_ROOT="/tmp/selflearningtrader_hundred"
-
           rm -rf "$TEMP_ROOT"
           mkdir -p "$TEMP_ROOT"
-
           unzip -q -o "$SELECTED_ZIP" -d "$TEMP_ROOT"
-
           ROOT="$TEMP_ROOT"
-
-          mapfile -t TOP < <(
-            find "$TEMP_ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
-          )
-
+          mapfile -t TOP < <(find "$TEMP_ROOT" -mindepth 1 -maxdepth 1 -print)
           if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
             ROOT="${TOP[0]}"
           fi
-
-          echo "Temporary project root:"
-          echo "$ROOT"
-
           test -f "$ROOT/buildozer.spec"
           test -f "$ROOT/requirements.txt"
           test -f "$ROOT/app/main.py"
           test -f "$ROOT/signing/debug.keystore"
-
           echo "TEMP_PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
-
-          echo "Temporary project verification PASSED."
 
       - name: Detect version from ZIP filename
         shell: bash
         run: |
           set -euo pipefail
-
           ZIP_NAME="$(basename "$SELECTED_ZIP")"
-
-          echo "ZIP filename:"
-          echo "$ZIP_NAME"
-
-          VERSION="$(
-            printf '%s\n' "$ZIP_NAME" |
-            sed -n \
-              's/^SelfLearningTrader_HUNDRED_\([0-9]\+\.[0-9]\+\.[0-9]\+\).*$/\1/p'
-          )"
-
+          VERSION="$(printf '%s\n' "$ZIP_NAME" | sed -n 's/^SelfLearningTrader_HUNDRED_\([0-9]\+\.[0-9]\+\.[0-9]\+\).*$/\1/p')"
           if [ -z "$VERSION" ]; then
             echo "ERROR: Could not detect version from ZIP filename."
             exit 1
           fi
-
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-
-          if ! [[ "$MAJOR" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: Invalid major version."
-            exit 1
-          fi
-
-          if ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: Invalid minor version."
-            exit 1
-          fi
-
-          if ! [[ "$PATCH" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: Invalid patch version."
-            exit 1
-          fi
-
-          NUMERIC_VERSION=$(
-            echo "$((10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH))"
-          )
-
+          [[ "$MAJOR" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$MINOR" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$PATCH" =~ ^[0-9]+$ ]] || exit 1
+          NUMERIC_VERSION=$((10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH))
           if [ "$NUMERIC_VERSION" -lt 10203 ]; then
             echo "ERROR: Version is older than 1.0.203."
             exit 1
           fi
-
-          echo "Detected version: $VERSION"
-          echo "Detected numeric version: $NUMERIC_VERSION"
-
           cd "$TEMP_PROJECT_ROOT"
-
-          sed -i \
-            -E \
-            "s/^[[:space:]]*version[[:space:]]*=.*/version = $VERSION/" \
-            buildozer.spec
-
-          sed -i \
-            -E \
-            "s/^[[:space:]]*android\.numeric_version[[:space:]]*=.*/android.numeric_version = $NUMERIC_VERSION/" \
-            buildozer.spec
-
+          sed -i -E "s/^[[:space:]]*version[[:space:]]*=.*/version = $VERSION/" buildozer.spec
+          sed -i -E "s/^[[:space:]]*android\.numeric_version[[:space:]]*=.*/android.numeric_version = $NUMERIC_VERSION/" buildozer.spec
           echo "BUILD_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_VERSION_CODE=$NUMERIC_VERSION" >> "$GITHUB_ENV"
-
-          echo "=== BUILD VERSION ==="
-
-          grep -E \
-            '^[[:space:]]*(version|android.numeric_version)[[:space:]]*=' \
-            buildozer.spec
+          grep -E '^[[:space:]]*(version|android.numeric_version)[[:space:]]*=' buildozer.spec
 
       - name: Install Java 17
         uses: actions/setup-java@v5
@@ -174,78 +93,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           sudo apt-get update
-
           sudo apt-get install -y \
-            ant \
-            autoconf \
-            automake \
-            autopoint \
-            ccache \
-            cmake \
-            g++ \
-            gcc \
-            gettext \
-            git \
-            lbzip2 \
-            libffi-dev \
-            libltdl-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            libssl-dev \
-            libtool \
-            make \
-            patch \
-            pkg-config \
-            python3 \
-            python3-dev \
-            python3-pip \
-            python3-venv \
-            rsync \
-            unzip \
-            wget \
-            zip \
-            zlib1g-dev
-
+            ant autoconf automake autopoint ccache cmake \
+            g++ gcc gettext git lbzip2 \
+            libffi-dev libltdl-dev libncurses5-dev libncursesw5-dev \
+            libssl-dev libtool make patch pkg-config \
+            python3 python3-dev python3-pip python3-venv \
+            rsync unzip wget zip zlib1g-dev
           python3 -m pip install --upgrade pip
-
-          python3 -m pip install \
-            "cython==3.0.12" \
-            "buildozer==1.5.0"
+          python3 -m pip install "cython==3.0.12" "buildozer==1.5.0"
 
       - name: Verify Java 17
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "JAVA_HOME=$JAVA_HOME"
-
           JAVA_VERSION="$(java -version 2>&1 | head -n 1)"
           JAVAC_VERSION="$(javac -version 2>&1 | head -n 1)"
-
           echo "$JAVA_VERSION"
           echo "$JAVAC_VERSION"
-
-          if ! printf '%s\n' "$JAVA_VERSION" |
-            grep -qE 'version "17\.'; then
-            echo "ERROR: Java 17 is not active."
-            exit 1
-          fi
-
-          if ! printf '%s\n' "$JAVAC_VERSION" |
-            grep -qE '^javac 17\.'; then
-            echo "ERROR: javac 17 is not active."
-            exit 1
-          fi
-
+          printf '%s\n' "$JAVA_VERSION" | grep -qE 'version "17\.'
+          printf '%s\n' "$JAVAC_VERSION" | grep -qE '^javac 17\.'
           echo "Java 17 verification PASSED."
 
       - name: Verify project before build
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$TEMP_PROJECT_ROOT"
 
           test -f buildozer.spec
@@ -254,33 +128,25 @@ jobs:
           test -f signing/debug.keystore
 
           PACKAGE_DOMAIN="$(
-            sed -n \
-              's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' \
-              buildozer.spec |
+            sed -n 's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' buildozer.spec |
             tail -n 1 |
             xargs
           )"
 
           PACKAGE_NAME="$(
-            sed -n \
-              's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' \
-              buildozer.spec |
+            sed -n 's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' buildozer.spec |
             tail -n 1 |
             xargs
           )"
 
           VERSION="$(
-            sed -n \
-              's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
-              buildozer.spec |
+            sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
             tail -n 1 |
             xargs
           )"
 
           VERSION_CODE="$(
-            sed -n \
-              's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
-              buildozer.spec |
+            sed -n 's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
             tail -n 1 |
             xargs
           )"
@@ -298,34 +164,21 @@ jobs:
           python3 -m compileall -q app
 
           mkdir -p "$HOME/.android"
-
-          cp \
-            signing/debug.keystore \
-            "$HOME/.android/debug.keystore"
-
-          chmod 600 \
-            "$HOME/.android/debug.keystore"
-
-          echo "=== SIGNING KEY ==="
+          cp signing/debug.keystore "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
 
           keytool -list \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
             -alias androiddebugkey
 
-          echo "Project verification PASSED."
-
       - name: Clean temporary Android state
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$TEMP_PROJECT_ROOT"
 
-          rm -rf \
-            .buildozer \
-            bin \
-            signed
+          rm -rf .buildozer bin signed
 
           find . \
             -type d \
@@ -342,13 +195,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-
           cd "$TEMP_PROJECT_ROOT"
-
-          echo "=== BUILD START ==="
-          echo "Project: $PWD"
-          echo "Version: $BUILD_VERSION"
-          echo "Version code: $BUILD_VERSION_CODE"
 
           java -version
           javac -version
@@ -410,14 +257,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$TEMP_PROJECT_ROOT"
 
           mapfile -t APKS < <(
-            find bin \
-              -type f \
-              -name '*.apk' \
-              -print
+            find bin -type f -name '*.apk' -print
           )
 
           if [ "${#APKS[@]}" -ne 1 ]; then
@@ -427,35 +270,24 @@ jobs:
 
           APK="${APKS[0]}"
 
-          echo "Generated APK:"
-          echo "$APK"
-
-          ls -lh "$APK"
-
           BADGING="$("$AAPT" dump badging "$APK")"
 
           printf '%s\n' "$BADGING"
 
           printf '%s\n' "$BADGING" |
-            grep -q \
-            "package: name='org.selflearningtrader.hundred'"
+            grep -q "package: name='org.selflearningtrader.hundred'"
 
           APK_VERSION="$(
             printf '%s\n' "$BADGING" |
-            sed -n \
-              "s/.*versionName='\([^']*\)'.*/\1/p" |
+            sed -n "s/.*versionName='\([^']*\)'.*/\1/p" |
             head -n 1
           )"
 
           APK_VERSION_CODE="$(
             printf '%s\n' "$BADGING" |
-            sed -n \
-              "s/.*versionCode='\([^']*\)'.*/\1/p" |
+            sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" |
             head -n 1
           )"
-
-          echo "APK version: $APK_VERSION"
-          echo "APK version code: $APK_VERSION_CODE"
 
           test "$APK_VERSION" = "$BUILD_VERSION"
           test "$APK_VERSION_CODE" = "$BUILD_VERSION_CODE"
@@ -466,30 +298,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$TEMP_PROJECT_ROOT"
 
-          APK="$(
-            find bin \
-              -type f \
-              -name '*.apk' \
-              -print
-          )"
-
+          APK="$(find bin -type f -name '*.apk' -print)"
           test -f "$APK"
 
           rm -rf signed
           mkdir -p signed
 
-          echo "=== ZIPALIGN ==="
-
           "$ZIPALIGN" -f -p 4 \
             "$APK" \
             signed/aligned.apk
-
-          test -f signed/aligned.apk
-
-          echo "=== SIGN APK ==="
 
           "$APKSIGNER" sign \
             --ks "$HOME/.android/debug.keystore" \
@@ -502,10 +321,6 @@ jobs:
             --v4-signing-enabled false \
             --out signed/final.apk \
             signed/aligned.apk
-
-          test -f signed/final.apk
-
-          echo "=== IMMEDIATE SIGNATURE CHECK ==="
 
           "$APKSIGNER" verify \
             --verbose \
@@ -521,40 +336,21 @@ jobs:
           set -euo pipefail
 
           APK="$SIGNED_APK"
-
           test -f "$APK"
 
-          echo "=== APK SIGNATURE VERIFICATION ==="
+          "$APKSIGNER" verify "$APK"
 
           "$APKSIGNER" verify \
-            --verbose \
             --print-certs \
             "$APK" |
             tee "$GITHUB_WORKSPACE/apk-cert.txt"
-
-          grep -q \
-            "Verified using v1 scheme (JAR signing): true" \
-            "$GITHUB_WORKSPACE/apk-cert.txt"
-
-          grep -q \
-            "Verified using v2 scheme (APK Signature Scheme v2): true" \
-            "$GITHUB_WORKSPACE/apk-cert.txt"
-
-          grep -q \
-            "Verified using v3 scheme (APK Signature Scheme v3): true" \
-            "$GITHUB_WORKSPACE/apk-cert.txt"
-
-          echo "APK signature schemes PASSED."
-
-          echo "=== CERTIFICATE SHA-256 ==="
 
           KEY_SHA="$(
             keytool -list -v \
               -keystore "$HOME/.android/debug.keystore" \
               -storepass android \
               -alias androiddebugkey |
-            awk -F': ' \
-              '/SHA256:/{print $2; exit}'
+            awk -F': ' '/SHA256:/{print $2; exit}'
           )"
 
           APK_SHA="$(
@@ -568,9 +364,6 @@ jobs:
             ' "$GITHUB_WORKSPACE/apk-cert.txt"
           )"
 
-          # keytool: 13:E0:41:41:...
-          # apksigner: 13e0414139...
-          # Убираем и пробелы, и двоеточия.
           KEY_SHA="$(
             printf '%s' "$KEY_SHA" |
             tr -d '[:space:]:' |
@@ -585,66 +378,31 @@ jobs:
 
           test -n "$KEY_SHA"
           test -n "$APK_SHA"
+          test "$KEY_SHA" = "$APK_SHA"
 
-          echo "Keystore SHA-256:"
-          echo "$KEY_SHA"
-
-          echo "APK SHA-256:"
-          echo "$APK_SHA"
-
-          if [ "$KEY_SHA" != "$APK_SHA" ]; then
-            echo "ERROR: APK certificate does not match project signing key."
-            exit 1
-          fi
-
-          echo "Signing key MATCHED."
-
-          echo "=== ZIPALIGN CHECK ==="
-
-          "$ZIPALIGN" \
-            -c \
-            -P 4 \
-            -v 4 \
-            "$APK"
-
-          echo "ZIPALIGN PASSED."
-
-          echo "=== FINAL PACKAGE CHECK ==="
+          "$ZIPALIGN" -c -P 4 -v 4 "$APK"
 
           FINAL_BADGING="$("$AAPT" dump badging "$APK")"
 
           printf '%s\n' "$FINAL_BADGING" |
-            grep -q \
-            "package: name='org.selflearningtrader.hundred'"
+            grep -q "package: name='org.selflearningtrader.hundred'"
 
           FINAL_VERSION="$(
             printf '%s\n' "$FINAL_BADGING" |
-            sed -n \
-              "s/.*versionName='\([^']*\)'.*/\1/p" |
+            sed -n "s/.*versionName='\([^']*\)'.*/\1/p" |
             head -n 1
           )"
 
           FINAL_VERSION_CODE="$(
             printf '%s\n' "$FINAL_BADGING" |
-            sed -n \
-              "s/.*versionCode='\([^']*\)'.*/\1/p" |
+            sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" |
             head -n 1
           )"
-
-          echo "Final version: $FINAL_VERSION"
-          echo "Final version code: $FINAL_VERSION_CODE"
 
           test "$FINAL_VERSION" = "$BUILD_VERSION"
           test "$FINAL_VERSION_CODE" = "$BUILD_VERSION_CODE"
 
-          echo "========================================"
-          echo "FINAL APK VERIFICATION PASSED"
-          echo "Package: org.selflearningtrader.hundred"
-          echo "Version: $FINAL_VERSION"
-          echo "Version code: $FINAL_VERSION_CODE"
-          echo "Signing key: MATCHED"
-          echo "ZIP alignment: PASSED"
-          echo "========================================"
+          echo "FINAL APK VERIFICATION PASSED."
 
       - name: Upload final APK artifact
         if: success()
@@ -669,10 +427,6 @@ jobs:
         shell: bash
         run: |
           set +e
-
           rm -rf /tmp/selflearningtrader_hundred
-
           rm -f "$GITHUB_WORKSPACE/build.log"
           rm -f "$GITHUB_WORKSPACE/apk-cert.txt"
-
-          echo "Temporary files removed."
