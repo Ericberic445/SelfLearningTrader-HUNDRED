@@ -117,32 +117,32 @@ jobs:
             sed -n \
               's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
-              tail -n 1 |
-              xargs
+            tail -n 1 |
+            xargs
           )"
 
           PACKAGE_NAME="$(
             sed -n \
               's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
-              tail -n 1 |
-              xargs
+            tail -n 1 |
+            xargs
           )"
 
           VERSION="$(
             sed -n \
               's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
-              tail -n 1 |
-              xargs
+            tail -n 1 |
+            xargs
           )"
 
           NUMERIC_VERSION="$(
             sed -n \
               's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
               buildozer.spec |
-              tail -n 1 |
-              xargs
+            tail -n 1 |
+            xargs
           )"
 
           test -n "$PACKAGE_DOMAIN"
@@ -238,17 +238,27 @@ jobs:
           JAVA_VERSION="$(java -version 2>&1 | head -n 1)"
           JAVAC_VERSION="$(javac -version 2>&1 | head -n 1)"
 
+          echo "JAVA_HOME=$JAVA_HOME"
           echo "$JAVA_VERSION"
           echo "$JAVAC_VERSION"
 
-          case "$JAVA_VERSION" in
-            *'"17.')
-              ;;
-            *)
-              echo "ERROR: Java 17 was not selected."
-              exit 1
-              ;;
-          esac
+          echo "=== CHECK JAVA 17 ==="
+
+          if ! printf '%s\n' "$JAVA_VERSION" | grep -qE 'version "17\.'; then
+            echo "ERROR: Java 17 was not selected."
+            echo "Detected:"
+            printf '%s\n' "$JAVA_VERSION"
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$JAVAC_VERSION" | grep -qE '^javac 17\.'; then
+            echo "ERROR: javac 17 was not selected."
+            echo "Detected:"
+            printf '%s\n' "$JAVAC_VERSION"
+            exit 1
+          fi
+
+          echo "Java 17 verification PASSED."
 
           echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
           echo "PATH=$JAVA_HOME/bin:$PATH" >> "$GITHUB_ENV"
@@ -462,8 +472,6 @@ jobs:
               '/SHA256:/{print $2; exit}'
           )"
 
-          # apksigner prints the certificate SHA-256
-          # on the line AFTER "certificate SHA-256 digest:".
           APK_SHA="$(
             awk '
               /certificate SHA-256 digest:/ {
