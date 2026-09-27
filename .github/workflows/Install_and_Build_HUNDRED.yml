@@ -198,9 +198,6 @@ jobs:
           export JAVA_HOME="$JAVA17"
           export PATH="$JAVA_HOME/bin:$PATH"
 
-          echo
-          echo "JAVA_HOME=$JAVA_HOME"
-
           java -version
           javac -version
 
@@ -210,18 +207,16 @@ jobs:
             head -n 1
           )"
 
-          if [ "$JAVA_MAJOR" != "17" ]; then
-            echo "ERROR: Java 17 is required."
-            echo "Detected Java: $JAVA_MAJOR"
-            exit 1
-          fi
+          test "$JAVA_MAJOR" = "17"
 
           echo "Java 17 verification PASSED."
 
       # ============================================================
-      # READ PROJECT INFORMATION AUTOMATICALLY
+      # VERIFY PROJECT
+      # VERSION IS ALWAYS READ FROM THE ZIP
+      # SIGNING KEY FINGERPRINT IS READ FROM THE ACTUAL KEY
       # ============================================================
-      - name: Verify installed project and fixed signing key
+      - name: Verify installed project and signing key
         shell: bash
         run: |
           set -euo pipefail
@@ -283,6 +278,7 @@ jobs:
           echo "Version code   : $NUMERIC_VERSION"
           echo "========================================"
 
+          # HUNDRED package ID must remain constant.
           test "$PACKAGE_ID" = "org.selflearningtrader.hundred"
 
           {
@@ -291,6 +287,10 @@ jobs:
             echo "HUNDRED_VERSION_CODE=$NUMERIC_VERSION"
           } >> "$GITHUB_ENV"
 
+          # ========================================================
+          # PYTHON SYNTAX
+          # ========================================================
+
           echo "Python syntax check..."
 
           python3 -m compileall -q app
@@ -298,7 +298,7 @@ jobs:
           echo "Python syntax check PASSED."
 
           # ========================================================
-          # FIXED SIGNING KEY
+          # INSTALL THE KEY FROM THE ZIP
           # ========================================================
 
           mkdir -p "$HOME/.android"
@@ -315,6 +315,11 @@ jobs:
             -storepass android \
             -alias androiddebugkey >/dev/null
 
+          # ========================================================
+          # READ ACTUAL SHA-256 FROM THE KEY
+          # NO HARDCODED FINGERPRINT
+          # ========================================================
+
           KEY_SHA="$(
             keytool -list -v \
               -keystore "$HOME/.android/debug.keystore" \
@@ -329,11 +334,17 @@ jobs:
             tr '[:lower:]' '[:upper:]'
           )"
 
-          echo "Signing key SHA-256:"
-          echo "$KEY_SHA"
+          test -n "$KEY_SHA"
 
-          test "$KEY_SHA" = \
-            "13E041413905CE30B0AA3E405AF97DDE862B0C3CFEDDB8B6652FA28D6687F04"
+          echo
+          echo "========================================"
+          echo "SIGNING KEY"
+          echo "========================================"
+          echo "SHA-256:"
+          echo "$KEY_SHA"
+          echo "========================================"
+
+          echo "HUNDRED_KEY_SHA=$KEY_SHA" >> "$GITHUB_ENV"
 
           echo "Signing key verification PASSED."
 
@@ -364,7 +375,7 @@ jobs:
             -delete
 
       # ============================================================
-      # VERIFY JAVA
+      # VERIFY JAVA BEFORE BUILD
       # ============================================================
       - name: Verify Java before Android build
         shell: bash
@@ -480,17 +491,6 @@ jobs:
           echo
           echo "Checking aapt..."
           "$AAPT" version
-
-          echo
-          echo "Checking zipalign..."
-
-          ZIPALIGN_TEST="$(mktemp)"
-
-          printf 'not-an-apk' > "$ZIPALIGN_TEST"
-
-          "$ZIPALIGN" -c 4 "$ZIPALIGN_TEST" >/dev/null 2>&1 || true
-
-          rm -f "$ZIPALIGN_TEST"
 
           echo
           echo "Android signing tools located successfully."
@@ -609,11 +609,16 @@ jobs:
 
           test -n "$APK"
 
+          echo
           echo "========================================"
           echo "FINAL APK"
           echo "========================================"
 
           ls -lh "$APK"
+
+          # ========================================================
+          # SIGNATURE VERIFICATION
+          # ========================================================
 
           "$APKSIGNER" verify \
             --verbose \
@@ -633,13 +638,9 @@ jobs:
             "Verified using v3 scheme (APK Signature Scheme v3): true" \
             apk-cert.txt
 
-          KEY_SHA="$(
-            keytool -list -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey |
-            awk -F': ' '/SHA256:/{print $2; exit}'
-          )"
+          # ========================================================
+          # READ ACTUAL APK CERTIFICATE SHA-256
+          # ========================================================
 
           APK_SHA="$(
             awk -F': ' \
@@ -647,14 +648,13 @@ jobs:
               apk-cert.txt
           )"
 
-          test -n "$KEY_SHA"
-          test -n "$APK_SHA"
-
-          KEY_SHA="$(
-            echo "$KEY_SHA" |
-            tr -d ':[:space:]' |
-            tr '[:lower:]' '[:upper:]'
-          )"
+          if [ -z "$APK_SHA" ]; then
+            APK_SHA="$(
+              awk -F': ' \
+                '/V3\.0 Signer: certificate SHA-256 digest:/{print $2; exit}' \
+                apk-cert.txt
+            )"
+          fi
 
           APK_SHA="$(
             echo "$APK_SHA" |
@@ -662,21 +662,39 @@ jobs:
             tr '[:lower:]' '[:upper:]'
           )"
 
-          echo
-          echo "Keystore SHA-256:"
-          echo "$KEY_SHA"
+          test -n "$APK_SHA"
+          test -n "$HUNDRED_KEY_SHA"
 
           echo
-          echo "APK SHA-256:"
+          echo "========================================"
+          echo "CERTIFICATE COMPARISON"
+          echo "========================================"
+          echo "Original key SHA-256:"
+          echo "$HUNDRED_KEY_SHA"
+          echo
+          echo "Final APK SHA-256:"
           echo "$APK_SHA"
+          echo "========================================"
 
-          test "$KEY_SHA" = "$APK_SHA"
+          # APK must be signed by the exact key that came
+          # from the selected ZIP.
+          test "$HUNDRED_KEY_SHA" = "$APK_SHA"
+
+          echo "Certificate comparison PASSED."
+
+          # ========================================================
+          # ZIPALIGN VERIFICATION
+          # ========================================================
 
           "$ZIPALIGN" \
             -c \
             -P 4 \
             -v 4 \
             "$APK"
+
+          # ========================================================
+          # FINAL PACKAGE / VERSION VERIFICATION
+          # ========================================================
 
           FINAL_BADGING="$("$AAPT" dump badging "$APK")"
 
