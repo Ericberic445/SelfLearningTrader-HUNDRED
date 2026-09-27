@@ -29,15 +29,13 @@ jobs:
       # JAVA 17
       # ============================================================
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       # ============================================================
-      # FIND AND EXTRACT THE NEWEST HUNDRED ZIP
-      # VERSION NUMBER IS NOT HARDCODED
+      # FIND ANY HUNDRED ZIP
       # ============================================================
       - name: Select and extract HUNDRED ZIP
         shell: bash
@@ -118,7 +116,7 @@ jobs:
             buildozer.spec || true
 
       # ============================================================
-      # INSTALL SYSTEM DEPENDENCIES
+      # SYSTEM DEPENDENCIES
       # ============================================================
       - name: Install Android build dependencies
         shell: bash
@@ -221,7 +219,7 @@ jobs:
           echo "Java 17 verification PASSED."
 
       # ============================================================
-      # READ VERSION AUTOMATICALLY FROM BUILDOZER.SPEC
+      # READ PROJECT VERSION AUTOMATICALLY
       # ============================================================
       - name: Verify installed project and fixed signing key
         shell: bash
@@ -285,8 +283,6 @@ jobs:
           echo "Version code   : $NUMERIC_VERSION"
           echo "========================================"
 
-          # Package ID HUNDRED is constant.
-          # Version and version code are NOT constant.
           test "$PACKAGE_ID" = "org.selflearningtrader.hundred"
 
           {
@@ -295,7 +291,6 @@ jobs:
             echo "HUNDRED_VERSION_CODE=$NUMERIC_VERSION"
           } >> "$GITHUB_ENV"
 
-          echo
           echo "Python syntax check..."
 
           python3 -m compileall -q app
@@ -303,7 +298,7 @@ jobs:
           echo "Python syntax check PASSED."
 
           # ========================================================
-          # INSTALL FIXED DEBUG KEY
+          # FIXED SIGNING KEY
           # ========================================================
 
           mkdir -p "$HOME/.android"
@@ -334,7 +329,6 @@ jobs:
             tr '[:lower:]' '[:upper:]'
           )"
 
-          echo
           echo "Signing key SHA-256:"
           echo "$KEY_SHA"
 
@@ -344,7 +338,7 @@ jobs:
           echo "Signing key verification PASSED."
 
       # ============================================================
-      # CLEAN BUILD
+      # CLEAN BUILD STATE
       # ============================================================
       - name: Clean Android build state
         shell: bash
@@ -370,7 +364,7 @@ jobs:
             -delete
 
       # ============================================================
-      # FINAL JAVA CHECK BEFORE BUILDOZER
+      # VERIFY JAVA BEFORE BUILD
       # ============================================================
       - name: Verify Java before Android build
         shell: bash
@@ -393,8 +387,10 @@ jobs:
 
           test "$JAVA_MAJOR" = "17"
 
+          echo "Java 17 is active."
+
       # ============================================================
-      # BUILD ANDROID APK
+      # BUILD APK
       # ============================================================
       - name: Build Android APK
         shell: bash
@@ -406,6 +402,7 @@ jobs:
           export JAVA_HOME="$JAVA_HOME"
           export PATH="$JAVA_HOME/bin:$PATH"
 
+          echo
           echo "========================================"
           echo "ANDROID BUILD"
           echo "========================================"
@@ -418,7 +415,7 @@ jobs:
           buildozer -v android debug 2>&1 | tee build.log
 
       # ============================================================
-      # LOCATE ANDROID SIGNING TOOLS
+      # LOCATE ANDROID TOOLS
       # ============================================================
       - name: Locate Android signing tools
         shell: bash
@@ -468,7 +465,7 @@ jobs:
           "$AAPT" version
 
       # ============================================================
-      # VERIFY APK PACKAGE AND AUTOMATIC VERSION
+      # VERIFY BUILD APK
       # ============================================================
       - name: Verify build APK package and version
         shell: bash
@@ -508,11 +505,10 @@ jobs:
             grep -q \
             "versionName='$HUNDRED_VERSION'"
 
-          echo
           echo "APK package/version verification PASSED."
 
       # ============================================================
-      # ALIGN AND SIGN WITH FIXED HUNDRED KEY
+      # ALIGN AND SIGN
       # ============================================================
       - name: Align and sign APK with fixed HUNDRED key
         shell: bash
@@ -562,7 +558,7 @@ jobs:
           cp signed/final.apk bin/
 
       # ============================================================
-      # FINAL APK VERIFICATION
+      # FINAL VERIFICATION
       # ============================================================
       - name: Verify final APK identity alignment and certificate
         shell: bash
@@ -674,7 +670,7 @@ jobs:
           echo "========================================"
 
       # ============================================================
-      # BUILD LOG
+      # UPLOAD BUILD LOG
       # ============================================================
       - name: Upload build log
         if: always()
@@ -685,7 +681,7 @@ jobs:
           if-no-files-found: warn
 
       # ============================================================
-      # FINAL APK
+      # UPLOAD FINAL APK
       # ============================================================
       - name: Upload final verified APK
         if: success()
