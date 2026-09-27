@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Searching for HUNDRED ZIP..."
+          echo "Searching for SelfLearningTrader_HUNDRED_*.zip..."
 
           find "$GITHUB_WORKSPACE" \
             -type f \
@@ -217,16 +217,31 @@ jobs:
           export JAVA_HOME="$JAVA17"
           export PATH="$JAVA_HOME/bin:$PATH"
 
+          echo
+          echo "========================================"
+          echo "JAVA 17"
+          echo "========================================"
+
           java -version
           javac -version
 
-          java -version 2>&1 > /tmp/java_version.txt
+          JAVA_VERSION="$(java -version 2>&1 | head -n 1)"
 
-          grep -q \
-            'version "17\.' \
-            /tmp/java_version.txt
+          echo
+          echo "Detected:"
+          echo "$JAVA_VERSION"
 
-          echo "Java 17 verification PASSED."
+          case "$JAVA_VERSION" in
+            *'"17.'*)
+              echo
+              echo "Java 17 verification PASSED."
+              ;;
+            *)
+              echo
+              echo "ERROR: Java 17 is required."
+              exit 1
+              ;;
+          esac
 
 
       # ============================================================
@@ -284,8 +299,6 @@ jobs:
           echo "Package ID   : $PACKAGE_ID"
           echo "Version      : $VERSION"
           echo "Version code : $VERSION_CODE"
-
-          echo
 
           if [ "$PACKAGE_ID" != "org.selflearningtrader.hundred" ]; then
             echo "ERROR: Wrong package ID."
@@ -348,6 +361,7 @@ jobs:
             /tmp/hundred_key_sha.txt \
             "$GITHUB_WORKSPACE/hundred_key_sha.txt"
 
+          echo
           echo "Signing key verification PASSED."
 
 
@@ -375,14 +389,14 @@ jobs:
 
           find . \
             -type f \
-            \( -name '*.pyc' -o -name '*.pyo' \) \
+            -name '*.pyc' -o -name '*.pyo' \
             -delete
 
           echo "Android build state cleaned."
 
 
       # ============================================================
-      # VERIFY JAVA
+      # VERIFY JAVA BEFORE BUILD
       # ============================================================
 
       - name: Verify Java before Android build
@@ -390,20 +404,38 @@ jobs:
         run: |
           set -euo pipefail
 
+          export JAVA_HOME="$JAVA_HOME"
+          export PATH="$JAVA_HOME/bin:$PATH"
+
+          echo
+          echo "========================================"
+          echo "JAVA BEFORE BUILD"
+          echo "========================================"
+
           java -version
           javac -version
 
-          java -version 2>&1 > /tmp/java_before_build.txt
+          JAVA_VERSION="$(java -version 2>&1 | head -n 1)"
 
-          grep -q \
-            'version "17\.' \
-            /tmp/java_before_build.txt
+          echo
+          echo "Detected:"
+          echo "$JAVA_VERSION"
 
-          echo "Java 17 confirmed."
+          case "$JAVA_VERSION" in
+            *'"17.'*)
+              echo
+              echo "Java 17 confirmed."
+              ;;
+            *)
+              echo
+              echo "ERROR: Java 17 is not active."
+              exit 1
+              ;;
+          esac
 
 
       # ============================================================
-      # BUILD APK
+      # BUILD ANDROID APK
       # ============================================================
 
       - name: Build Android APK
@@ -542,25 +574,30 @@ jobs:
           read -r APK < /tmp/built_apks.txt
 
           echo
-          echo "Build APK:"
+          echo "========================================"
+          echo "BUILD APK"
+          echo "========================================"
+
           echo "$APK"
 
           "$AAPT" dump badging "$APK" > /tmp/build_badging.txt
 
-          echo
-          echo "APK BADGING:"
           cat /tmp/build_badging.txt
 
           python3 - <<'PY'
-          import re
           import os
+          import re
           import sys
 
-          badging = open("/tmp/build_badging.txt", "r", encoding="utf-8").read()
+          text = open(
+              "/tmp/build_badging.txt",
+              "r",
+              encoding="utf-8"
+          ).read()
 
           match = re.search(
               r"package:\s+name='([^']+)'.*?versionCode='([^']+)'.*?versionName='([^']+)'",
-              badging
+              text
           )
 
           if not match:
@@ -575,10 +612,12 @@ jobs:
           expected_version = os.environ["HUNDRED_VERSION"]
           expected_version_code = os.environ["HUNDRED_VERSION_CODE"]
 
+          print()
           print("Detected package     :", package_id)
           print("Detected version     :", version)
           print("Detected versionCode :", version_code)
 
+          print()
           print("Expected package     :", expected_package)
           print("Expected version     :", expected_version)
           print("Expected versionCode :", expected_version_code)
@@ -595,6 +634,7 @@ jobs:
               print("ERROR: APK version code mismatch.")
               sys.exit(1)
 
+          print()
           print("APK package/version verification PASSED.")
           PY
 
@@ -636,125 +676,4 @@ jobs:
             -c \
             -v \
             4 \
-            signed/aligned.apk
-
-          echo
-          echo "ZIPALIGN PASSED."
-
-
-      # ============================================================
-      # SIGN APK
-      # ============================================================
-
-      - name: Sign APK with HUNDRED key
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$GITHUB_WORKSPACE"
-
-          test -f signed/aligned.apk
-
-          echo
-          echo "========================================"
-          echo "SIGNING APK"
-          echo "========================================"
-
-          "$APKSIGNER" sign \
-            --ks "$HOME/.android/debug.keystore" \
-            --ks-key-alias androiddebugkey \
-            --ks-pass pass:android \
-            --key-pass pass:android \
-            --v1-signing-enabled true \
-            --v2-signing-enabled true \
-            --v3-signing-enabled true \
-            --v4-signing-enabled false \
-            --out signed/final.apk \
-            signed/aligned.apk
-
-          test -f signed/final.apk
-
-          rm -f bin/*.apk
-
-          cp \
-            signed/final.apk \
-            bin/hundred-final.apk
-
-          echo
-          echo "Final APK:"
-          ls -lh bin/hundred-final.apk
-
-
-      # ============================================================
-      # FINAL APK VERIFICATION
-      # ============================================================
-
-      - name: Verify final APK identity alignment and certificate
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$GITHUB_WORKSPACE"
-
-          APK="$GITHUB_WORKSPACE/bin/hundred-final.apk"
-
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: Final APK not found."
-            exit 1
-          fi
-
-          echo
-          echo "========================================"
-          echo "FINAL APK VERIFICATION"
-          echo "========================================"
-
-          # --------------------------------------------------------
-          # APK SIGNATURE
-          # --------------------------------------------------------
-
-          set +e
-
-          "$APKSIGNER" verify \
-            --verbose \
-            --print-certs \
-            "$APK" \
-            > apk-cert.txt \
-            2>&1
-
-          VERIFY_EXIT=$?
-
-          set -e
-
-          cat apk-cert.txt
-
-          if [ "$VERIFY_EXIT" -ne 0 ]; then
-            echo
-            echo "ERROR: apksigner verification FAILED."
-            exit "$VERIFY_EXIT"
-          fi
-
-          echo
-          echo "apksigner verification PASSED."
-
-
-          # --------------------------------------------------------
-          # CERTIFICATE SHA-256
-          # --------------------------------------------------------
-
-          python3 - <<'PY'
-          import re
-          import sys
-
-          text = open("apk-cert.txt", "r", encoding="utf-8").read()
-
-          patterns = [
-              r"certificate SHA-256 digest:\s*([0-9a-fA-F:]+)",
-              r"certificate SHA-256 digest:\s*\n\s*([0-9a-fA-F:]+)",
-              r"V3\.0 Signer: certificate SHA-256 digest:\s*([0-9a-fA-F:]+)",
-              r"V3\.0 Signer: certificate SHA-256 digest:\s*\n\s*([0-9a-fA-F]+)"
-          ]
-
-          apk_sha = None
-
-          for pattern in patterns:
-              match = re.search
+           
