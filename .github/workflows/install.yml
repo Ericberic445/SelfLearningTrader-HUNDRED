@@ -40,7 +40,7 @@ jobs:
 
 
       # ============================================================
-      # FIND AND EXTRACT THE NEWEST HUNDRED ZIP
+      # FIND ANY HUNDRED ZIP
       # ============================================================
 
       - name: Select and extract HUNDRED ZIP
@@ -50,22 +50,20 @@ jobs:
 
           echo "Searching for HUNDRED ZIP..."
 
-          mapfile -t ZIPS < <(
-            find "$GITHUB_WORKSPACE" \
-              -type f \
-              -name 'SelfLearningTrader_HUNDRED_*.zip' \
-              -not -path "$GITHUB_WORKSPACE/.git/*" \
-              -printf '%T@ %p\n' |
-            sort -nr |
-            sed 's/^[^ ]* //'
-          )
+          find "$GITHUB_WORKSPACE" \
+            -type f \
+            -name 'SelfLearningTrader_HUNDRED_*.zip' \
+            -not -path "$GITHUB_WORKSPACE/.git/*" \
+            -printf '%T@ %p\n' |
+          sort -nr |
+          sed 's/^[^ ]* //' > /tmp/hundred_zips.txt
 
-          if [ "${#ZIPS[@]}" -eq 0 ]; then
+          if [ ! -s /tmp/hundred_zips.txt ]; then
             echo "ERROR: No SelfLearningTrader_HUNDRED_*.zip found."
             exit 1
           fi
 
-          ZIP="${ZIPS[0]}"
+          read -r ZIP < /tmp/hundred_zips.txt
 
           echo
           echo "========================================"
@@ -92,15 +90,20 @@ jobs:
 
           ROOT="$INSTALL_ROOT"
 
-          mapfile -t TOP < <(
-            find "$INSTALL_ROOT" \
-              -mindepth 1 \
-              -maxdepth 1 \
-              -print
-          )
+          find "$INSTALL_ROOT" \
+            -mindepth 1 \
+            -maxdepth 1 \
+            -type d \
+            -print > /tmp/hundred_top_dirs.txt
 
-          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
-            ROOT="${TOP[0]}"
+          TOP_COUNT="$(wc -l < /tmp/hundred_top_dirs.txt)"
+
+          if [ "$TOP_COUNT" = "1" ]; then
+            read -r POSSIBLE_ROOT < /tmp/hundred_top_dirs.txt
+
+            if [ -f "$POSSIBLE_ROOT/buildozer.spec" ]; then
+              ROOT="$POSSIBLE_ROOT"
+            fi
           fi
 
           echo
@@ -217,22 +220,17 @@ jobs:
           java -version
           javac -version
 
-          JAVA_MAJOR="$(
-            java -version 2>&1 |
-            sed -n 's/.*version "\([0-9]*\).*/\1/p' |
-            head -n 1
-          )"
+          java -version 2>&1 > /tmp/java_version.txt
 
-          if [ "$JAVA_MAJOR" != "17" ]; then
-            echo "ERROR: Java 17 required."
-            exit 1
-          fi
+          grep -q \
+            'version "17\.' \
+            /tmp/java_version.txt
 
           echo "Java 17 verification PASSED."
 
 
       # ============================================================
-      # VERIFY PROJECT
+      # VERIFY PROJECT AND SIGNING KEY
       # ============================================================
 
       - name: Verify installed project and signing key
@@ -247,64 +245,56 @@ jobs:
           test -f app/main.py
           test -f signing/debug.keystore
 
-          PACKAGE_DOMAIN="$(
-            sed -n \
-              's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' \
-              buildozer.spec |
-            tail -n 1 |
-            xargs
-          )"
-
-          PACKAGE_NAME="$(
-            sed -n \
-              's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' \
-              buildozer.spec |
-            tail -n 1 |
-            xargs
-          )"
-
-          VERSION="$(
-            sed -n \
-              's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
-              buildozer.spec |
-            tail -n 1 |
-            xargs
-          )"
-
-          VERSION_CODE="$(
-            sed -n \
-              's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
-              buildozer.spec |
-            tail -n 1 |
-            xargs
-          )"
-
-          test -n "$PACKAGE_DOMAIN"
-          test -n "$PACKAGE_NAME"
-          test -n "$VERSION"
-          test -n "$VERSION_CODE"
-
-          PACKAGE_ID="${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
-
           echo
           echo "========================================"
           echo "PROJECT INFORMATION"
           echo "========================================"
+
+          sed -n \
+            's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' \
+            buildozer.spec |
+          tail -n 1 |
+          xargs > /tmp/package_domain.txt
+
+          sed -n \
+            's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' \
+            buildozer.spec |
+          tail -n 1 |
+          xargs > /tmp/package_name.txt
+
+          sed -n \
+            's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
+            buildozer.spec |
+          tail -n 1 |
+          xargs > /tmp/project_version.txt
+
+          sed -n \
+            's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
+            buildozer.spec |
+          tail -n 1 |
+          xargs > /tmp/project_version_code.txt
+
+          read -r PACKAGE_DOMAIN < /tmp/package_domain.txt
+          read -r PACKAGE_NAME < /tmp/package_name.txt
+          read -r VERSION < /tmp/project_version.txt
+          read -r VERSION_CODE < /tmp/project_version_code.txt
+
+          PACKAGE_ID="${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
+
           echo "Package ID   : $PACKAGE_ID"
           echo "Version      : $VERSION"
           echo "Version code : $VERSION_CODE"
-          echo "========================================"
+
+          echo
 
           if [ "$PACKAGE_ID" != "org.selflearningtrader.hundred" ]; then
             echo "ERROR: Wrong package ID."
             exit 1
           fi
 
-          {
-            echo "HUNDRED_PACKAGE_ID=$PACKAGE_ID"
-            echo "HUNDRED_VERSION=$VERSION"
-            echo "HUNDRED_VERSION_CODE=$VERSION_CODE"
-          } >> "$GITHUB_ENV"
+          echo "HUNDRED_PACKAGE_ID=$PACKAGE_ID" >> "$GITHUB_ENV"
+          echo "HUNDRED_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "HUNDRED_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
           echo
           echo "Python syntax check..."
@@ -314,7 +304,9 @@ jobs:
           echo "Python syntax check PASSED."
 
           echo
-          echo "Installing signing key..."
+          echo "========================================"
+          echo "SIGNING KEY"
+          echo "========================================"
 
           mkdir -p "$HOME/.android"
 
@@ -328,34 +320,34 @@ jobs:
           keytool -list \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
-            -alias androiddebugkey >/dev/null
+            -alias androiddebugkey > /tmp/key_list.txt
 
-          KEY_SHA="$(
-            keytool -list -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey |
-            awk -F': ' '/SHA256:/{print $2; exit}'
-          )"
+          keytool -list -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey > /tmp/key_details.txt
 
-          KEY_SHA="$(
-            echo "$KEY_SHA" |
-            tr -d ':[:space:]' |
-            tr '[:lower:]' '[:upper:]'
-          )"
+          awk -F': ' \
+            '/SHA256:/{print $2; exit}' \
+            /tmp/key_details.txt |
+          tr -d ':[:space:]' |
+          tr '[:lower:]' '[:upper:]' \
+            > /tmp/hundred_key_sha.txt
 
-          if [ -z "$KEY_SHA" ]; then
+          if [ ! -s /tmp/hundred_key_sha.txt ]; then
             echo "ERROR: Could not read signing key SHA-256."
             exit 1
           fi
 
-          echo
+          read -r KEY_SHA < /tmp/hundred_key_sha.txt
+
           echo "Signing key SHA-256:"
           echo "$KEY_SHA"
 
-          echo "HUNDRED_KEY_SHA=$KEY_SHA" >> "$GITHUB_ENV"
+          cp \
+            /tmp/hundred_key_sha.txt \
+            "$GITHUB_WORKSPACE/hundred_key_sha.txt"
 
-          echo
           echo "Signing key verification PASSED."
 
 
@@ -390,7 +382,7 @@ jobs:
 
 
       # ============================================================
-      # VERIFY JAVA BEFORE BUILD
+      # VERIFY JAVA
       # ============================================================
 
       - name: Verify Java before Android build
@@ -398,30 +390,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "JAVA_HOME=$JAVA_HOME"
-
-          which java
-          which javac
-
           java -version
           javac -version
 
-          JAVA_MAJOR="$(
-            java -version 2>&1 |
-            sed -n 's/.*version "\([0-9]*\).*/\1/p' |
-            head -n 1
-          )"
+          java -version 2>&1 > /tmp/java_before_build.txt
 
-          if [ "$JAVA_MAJOR" != "17" ]; then
-            echo "ERROR: Java 17 is not active."
-            exit 1
-          fi
+          grep -q \
+            'version "17\.' \
+            /tmp/java_before_build.txt
 
           echo "Java 17 confirmed."
 
 
       # ============================================================
-      # BUILD ANDROID APK
+      # BUILD APK
       # ============================================================
 
       - name: Build Android APK
@@ -445,27 +427,25 @@ jobs:
           buildozer -v android debug 2>&1 | tee build.log
 
           echo
-          echo "Buildozer completed successfully."
+          echo "Buildozer completed."
 
-          mapfile -t BUILT_APKS < <(
-            find bin \
-              -type f \
-              -name '*.apk' \
-              -print
-          )
+          find bin \
+            -type f \
+            -name '*.apk' \
+            -print > /tmp/built_apks.txt
 
-          if [ "${#BUILT_APKS[@]}" -eq 0 ]; then
+          if [ ! -s /tmp/built_apks.txt ]; then
             echo "ERROR: Buildozer completed but no APK was produced."
             exit 1
           fi
 
           echo
           echo "Produced APK:"
-          printf '%s\n' "${BUILT_APKS[@]}"
+          cat /tmp/built_apks.txt
 
 
       # ============================================================
-      # LOCATE ANDROID SIGNING TOOLS
+      # LOCATE ANDROID TOOLS
       # ============================================================
 
       - name: Locate Android signing tools
@@ -473,50 +453,48 @@ jobs:
         run: |
           set -euo pipefail
 
-          APKSIGNER="$(
-            find "$HOME/.buildozer" \
-              -type f \
-              -name apksigner \
-              -perm -111 \
-              -print 2>/dev/null |
-            sort -V |
-            tail -n 1
-          )"
+          find "$HOME/.buildozer" \
+            -type f \
+            -name apksigner \
+            -perm -111 \
+            -print 2>/dev/null |
+          sort -V |
+          tail -n 1 > /tmp/apksigner_path.txt
 
-          ZIPALIGN="$(
-            find "$HOME/.buildozer" \
-              -type f \
-              -name zipalign \
-              -perm -111 \
-              -print 2>/dev/null |
-            sort -V |
-            tail -n 1
-          )"
+          find "$HOME/.buildozer" \
+            -type f \
+            -name zipalign \
+            -perm -111 \
+            -print 2>/dev/null |
+          sort -V |
+          tail -n 1 > /tmp/zipalign_path.txt
 
-          AAPT="$(
-            find "$HOME/.buildozer" \
-              -type f \
-              -name aapt \
-              -perm -111 \
-              -print 2>/dev/null |
-            sort -V |
-            tail -n 1
-          )"
+          find "$HOME/.buildozer" \
+            -type f \
+            -name aapt \
+            -perm -111 \
+            -print 2>/dev/null |
+          sort -V |
+          tail -n 1 > /tmp/aapt_path.txt
 
-          if [ -z "$APKSIGNER" ]; then
+          if [ ! -s /tmp/apksigner_path.txt ]; then
             echo "ERROR: apksigner not found."
             exit 1
           fi
 
-          if [ -z "$ZIPALIGN" ]; then
+          if [ ! -s /tmp/zipalign_path.txt ]; then
             echo "ERROR: zipalign not found."
             exit 1
           fi
 
-          if [ -z "$AAPT" ]; then
+          if [ ! -s /tmp/aapt_path.txt ]; then
             echo "ERROR: aapt not found."
             exit 1
           fi
+
+          read -r APKSIGNER < /tmp/apksigner_path.txt
+          read -r ZIPALIGN < /tmp/zipalign_path.txt
+          read -r AAPT < /tmp/aapt_path.txt
 
           echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
           echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
@@ -530,9 +508,11 @@ jobs:
           echo "apksigner:"
           echo "$APKSIGNER"
 
+          echo
           echo "zipalign:"
           echo "$ZIPALIGN"
 
+          echo
           echo "aapt:"
           echo "$AAPT"
 
@@ -549,7 +529,7 @@ jobs:
 
 
       # ============================================================
-      # VERIFY BUILD APK PACKAGE AND VERSION
+      # VERIFY BUILD APK
       # ============================================================
 
       - name: Verify build APK package and version
@@ -559,74 +539,64 @@ jobs:
 
           cd "$GITHUB_WORKSPACE"
 
-          APK="$(
-            find bin \
-              -type f \
-              -name '*.apk' \
-              -print |
-            head -n 1
-          )"
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: No APK found."
-            exit 1
-          fi
+          read -r APK < /tmp/built_apks.txt
 
           echo
           echo "Build APK:"
           echo "$APK"
 
-          BADGING="$("$AAPT" dump badging "$APK")"
+          "$AAPT" dump badging "$APK" > /tmp/build_badging.txt
 
           echo
           echo "APK BADGING:"
-          printf '%s\n' "$BADGING"
+          cat /tmp/build_badging.txt
 
-          APK_PACKAGE="$(
-            printf '%s\n' "$BADGING" |
-            sed -n "s/^package: name='\([^']*\)'.*/\1/p" |
-            head -n 1
-          )"
+          python3 - <<'PY'
+          import re
+          import os
+          import sys
 
-          APK_VERSION_CODE="$(
-            printf '%s\n' "$BADGING" |
-            sed -n "s/^package:.*versionCode='\([^']*\)'.*/\1/p" |
-            head -n 1
-          )"
+          badging = open("/tmp/build_badging.txt", "r", encoding="utf-8").read()
 
-          APK_VERSION="$(
-            printf '%s\n' "$BADGING" |
-            sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p" |
-            head -n 1
-          )"
+          match = re.search(
+              r"package:\s+name='([^']+)'.*?versionCode='([^']+)'.*?versionName='([^']+)'",
+              badging
+          )
 
-          echo
-          echo "Detected package:"
-          echo "$APK_PACKAGE"
+          if not match:
+              print("ERROR: Could not parse APK package information.")
+              sys.exit(1)
 
-          echo "Detected version:"
-          echo "$APK_VERSION"
+          package_id = match.group(1)
+          version_code = match.group(2)
+          version = match.group(3)
 
-          echo "Detected version code:"
-          echo "$APK_VERSION_CODE"
+          expected_package = os.environ["HUNDRED_PACKAGE_ID"]
+          expected_version = os.environ["HUNDRED_VERSION"]
+          expected_version_code = os.environ["HUNDRED_VERSION_CODE"]
 
-          if [ "$APK_PACKAGE" != "$HUNDRED_PACKAGE_ID" ]; then
-            echo "ERROR: APK package mismatch."
-            exit 1
-          fi
+          print("Detected package     :", package_id)
+          print("Detected version     :", version)
+          print("Detected versionCode :", version_code)
 
-          if [ "$APK_VERSION" != "$HUNDRED_VERSION" ]; then
-            echo "ERROR: APK version mismatch."
-            exit 1
-          fi
+          print("Expected package     :", expected_package)
+          print("Expected version     :", expected_version)
+          print("Expected versionCode :", expected_version_code)
 
-          if [ "$APK_VERSION_CODE" != "$HUNDRED_VERSION_CODE" ]; then
-            echo "ERROR: APK version code mismatch."
-            exit 1
-          fi
+          if package_id != expected_package:
+              print("ERROR: APK package mismatch.")
+              sys.exit(1)
 
-          echo
-          echo "APK package/version verification PASSED."
+          if version != expected_version:
+              print("ERROR: APK version mismatch.")
+              sys.exit(1)
+
+          if version_code != expected_version_code:
+              print("ERROR: APK version code mismatch.")
+              sys.exit(1)
+
+          print("APK package/version verification PASSED.")
+          PY
 
 
       # ============================================================
@@ -640,23 +610,15 @@ jobs:
 
           cd "$GITHUB_WORKSPACE"
 
-          APK="$(
-            find bin \
-              -type f \
-              -name '*.apk' \
-              -print |
-            head -n 1
-          )"
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK not found."
-            exit 1
-          fi
+          read -r APK < /tmp/built_apks.txt
 
           rm -rf signed
           mkdir -p signed
 
-          echo "Aligning APK..."
+          echo
+          echo "========================================"
+          echo "ALIGNING APK"
+          echo "========================================"
 
           "$ZIPALIGN" \
             -f \
@@ -668,9 +630,6 @@ jobs:
           test -f signed/aligned.apk
 
           echo
-          echo "APK alignment completed."
-
-          echo
           echo "Checking alignment..."
 
           "$ZIPALIGN" \
@@ -680,14 +639,14 @@ jobs:
             signed/aligned.apk
 
           echo
-          echo "ZIPALIGN verification PASSED."
+          echo "ZIPALIGN PASSED."
 
 
       # ============================================================
       # SIGN APK
       # ============================================================
 
-      - name: Sign APK with fixed HUNDRED key
+      - name: Sign APK with HUNDRED key
         shell: bash
         run: |
           set -euo pipefail
@@ -697,7 +656,9 @@ jobs:
           test -f signed/aligned.apk
 
           echo
-          echo "Signing APK..."
+          echo "========================================"
+          echo "SIGNING APK"
+          echo "========================================"
 
           "$APKSIGNER" sign \
             --ks "$HOME/.android/debug.keystore" \
@@ -748,7 +709,7 @@ jobs:
           echo "========================================"
 
           # --------------------------------------------------------
-          # APKSIGNER
+          # APK SIGNATURE
           # --------------------------------------------------------
 
           set +e
@@ -777,31 +738,23 @@ jobs:
 
 
           # --------------------------------------------------------
-          # EXTRACT APK CERTIFICATE SHA-256
+          # CERTIFICATE SHA-256
           # --------------------------------------------------------
 
-          APK_SHA="$(
-            awk '
-              /certificate SHA-256 digest:/ {
-                line=$0
-                sub(/^.*certificate SHA-256 digest:[[:space:]]*/, "", line)
+          python3 - <<'PY'
+          import re
+          import sys
 
-                if (line != "") {
-                  print line
-                  exit
-                }
+          text = open("apk-cert.txt", "r", encoding="utf-8").read()
 
-                getline line
-                gsub(/^[ \t]+|[ \t]+$/, "", line)
-                print line
-                exit
-              }
-            ' apk-cert.txt
-          )"
+          patterns = [
+              r"certificate SHA-256 digest:\s*([0-9a-fA-F:]+)",
+              r"certificate SHA-256 digest:\s*\n\s*([0-9a-fA-F:]+)",
+              r"V3\.0 Signer: certificate SHA-256 digest:\s*([0-9a-fA-F:]+)",
+              r"V3\.0 Signer: certificate SHA-256 digest:\s*\n\s*([0-9a-fA-F]+)"
+          ]
 
-          if [ -z "$APK_SHA" ]; then
-            APK_SHA="$(
-              grep -i \
-                "certificate SHA-256 digest:" \
-                apk-cert.txt |
-              h
+          apk_sha = None
+
+          for pattern in patterns:
+              match = re.search
