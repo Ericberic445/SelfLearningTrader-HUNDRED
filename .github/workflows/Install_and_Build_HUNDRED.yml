@@ -325,7 +325,7 @@ jobs:
 
           KEY_SHA="$(
             echo "$KEY_SHA" |
-            tr -d '[:space:]' |
+            tr -d ':[:space:]' |
             tr '[:lower:]' '[:upper:]'
           )"
 
@@ -333,7 +333,7 @@ jobs:
           echo "$KEY_SHA"
 
           test "$KEY_SHA" = \
-            "13:E0:41:41:39:05:CE:30:B0:AA:3E:40:5A:F9:7D:DE:86:2B:0C:3C:FE:DD:DB:8B:66:52:FA:28:D6:68:7F:04"
+            "13E041413905CE30B0AA3E405AF97DDE862B0C3CFEDDB8B6652FA28D6687F04"
 
           echo "Signing key verification PASSED."
 
@@ -484,10 +484,7 @@ jobs:
           echo
           echo "Checking zipalign..."
 
-          ZIPALIGN_TEST="$(
-            mktemp \
-              --suffix=.apk
-          )"
+          ZIPALIGN_TEST="$(mktemp)"
 
           printf 'not-an-apk' > "$ZIPALIGN_TEST"
 
@@ -655,13 +652,13 @@ jobs:
 
           KEY_SHA="$(
             echo "$KEY_SHA" |
-            tr -d '[:space:]' |
+            tr -d ':[:space:]' |
             tr '[:lower:]' '[:upper:]'
           )"
 
           APK_SHA="$(
             echo "$APK_SHA" |
-            tr -d '[:space:]' |
+            tr -d ':[:space:]' |
             tr '[:lower:]' '[:upper:]'
           )"
 
