@@ -4,7 +4,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'SelfLearningTrader_HUNDRED_*.zip'
+      - "SelfLearningTrader_HUNDRED_*.zip"
+      - "**/SelfLearningTrader_HUNDRED_*.zip"
 
 permissions:
   contents: read
@@ -15,47 +16,68 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select and extract HUNDRED ZIP
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t ZIPS < <(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'SelfLearningTrader_HUNDRED_*.zip' -print | sort -V)
+
+          mapfile -t ZIPS < <(
+            find "$GITHUB_WORKSPACE" -type f \
+              -name 'SelfLearningTrader_HUNDRED_*.zip' \
+              -not -path "$GITHUB_WORKSPACE/.git/*" \
+              -print | sort -V
+          )
+
           test "${#ZIPS[@]}" -gt 0
           ZIP="${ZIPS[${#ZIPS[@]}-1]}"
+
           echo "Selected ZIP: $ZIP"
+          sha256sum "$ZIP"
           unzip -q -t "$ZIP"
 
-          # IMPORTANT: extract outside the repository.
-          # The previous workflow extracted inside the repository and then rsync --delete
-          # deleted files from its own source, causing rsync error 24.
-          rm -rf /tmp/hundred_project
-          mkdir -p /tmp/hundred_project
-          unzip -q -o "$ZIP" -d /tmp/hundred_project
+          INSTALL_ROOT="/tmp/hundred_project"
+          rm -rf "$INSTALL_ROOT"
+          mkdir -p "$INSTALL_ROOT"
+          unzip -q -o "$ZIP" -d "$INSTALL_ROOT"
 
-          mapfile -t TOP < <(find /tmp/hundred_project -mindepth 1 -maxdepth 1 -print)
+          ROOT="$INSTALL_ROOT"
+          mapfile -t TOP < <(
+            find "$INSTALL_ROOT" -mindepth 1 -maxdepth 1 -print
+          )
+
           if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
             ROOT="${TOP[0]}"
-          else
-            ROOT="/tmp/hundred_project"
           fi
-          echo "Extracted project root: $ROOT"
 
-          # Copy the project into the runner workspace, but preserve the current
-          # bootstrap workflow. No git push is performed by this workflow.
-          rsync -a --delete --exclude='.git/' --exclude='.github/' "$ROOT"/ "$GITHUB_WORKSPACE"/
+          echo "Project root: $ROOT"
 
-          test -f "$GITHUB_WORKSPACE/buildozer.spec"
-          test -f "$GITHUB_WORKSPACE/requirements.txt"
-          test -f "$GITHUB_WORKSPACE/app/main.py"
-          test -f "$GITHUB_WORKSPACE/p4a-recipes/kivy/__init__.py"
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            "$ROOT"/ "$GITHUB_WORKSPACE"/
+
+          rm -rf "$INSTALL_ROOT"
+
+          cd "$GITHUB_WORKSPACE"
+
+          test -f buildozer.spec
+          test -f requirements.txt
+          test -f app/main.py
+          test -f signing/debug.keystore
+
+          echo "=== PROJECT VERSION ==="
+          grep -E '^[[:space:]]*(package.name|package.domain|version|android.numeric_version)[[:space:]]*=' buildozer.spec
 
       - name: Install Android build dependencies
         shell: bash
         run: |
           set -euo pipefail
+
           sudo apt-get update
           sudo apt-get install -y \
             ant autoconf automake autopoint ccache cmake \
@@ -64,42 +86,330 @@ jobs:
             libssl-dev libtool make openjdk-17-jdk patch pkg-config \
             python3 python3-dev python3-pip python3-venv rsync \
             unzip wget zip zlib1g-dev
-          python3 -m pip install --upgrade pip
-          python3 -m pip install 'cython==3.0.12' buildozer==1.5.0
 
-      - name: Verify project before build
+          python3 -m pip install --upgrade pip
+          python3 -m pip install "cython==3.0.12" "buildozer==1.5.0"
+
+      - name: Verify project and signing key
         shell: bash
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          echo '=== buildozer.spec ==='
-          cat buildozer.spec
-          echo '=== requirements.txt ==='
-          cat requirements.txt
-          echo '=== required files ==='
+
+          test -f buildozer.spec
+          test -f requirements.txt
           test -f app/main.py
-          test -f p4a-recipes/kivy/__init__.py
-          grep -q '^p4a.local_recipes = p4a-recipes$' buildozer.spec
-          grep -q '^p4a.branch = v2026.05.09$' buildozer.spec
-          grep -q '^requirements = python3,kivy==2.3.1,numpy,certifi$' buildozer.spec
-          ! grep -RniE 'requests|charset[-_]normalizer|urllib3|pandas|scikit-learn|joblib' buildozer.spec requirements.txt app
-          test "$(python3 -c 'import Cython; print(Cython.__version__)')" = '3.0.12'
+          test -f signing/debug.keystore
+
+          PACKAGE_DOMAIN="$(
+            sed -n 's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' buildozer.spec |
+              tail -n 1 | xargs
+          )"
+
+          PACKAGE_NAME="$(
+            sed -n 's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' buildozer.spec |
+              tail -n 1 | xargs
+          )"
+
+          VERSION="$(
+            sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
+              tail -n 1 | xargs
+          )"
+
+          NUMERIC_VERSION="$(
+            sed -n 's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' buildozer.spec |
+              tail -n 1 | xargs
+          )"
+
+          test -n "$PACKAGE_DOMAIN"
+          test -n "$PACKAGE_NAME"
+          test -n "$VERSION"
+          test -n "$NUMERIC_VERSION"
+
+          PACKAGE_ID="${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
+
+          echo "Package ID:     $PACKAGE_ID"
+          echo "Version:        $VERSION"
+          echo "Version code:   $NUMERIC_VERSION"
+
+          test "$PACKAGE_ID" = "org.selflearningtrader.hundred"
+
           python3 -m compileall -q app
-          echo '=== verification passed ==='
+
+          mkdir -p "$HOME/.android"
+          cp signing/debug.keystore "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+
+          echo "=== SIGNING KEY ==="
+
+          keytool -list \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey
+
+          echo "=== SIGNING CERTIFICATE SHA-256 ==="
+
+          keytool -list -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey |
+            grep -E 'Owner:|SHA256:'
+
+          echo "Project and signing-key verification passed."
+
+      - name: Clean Android build state
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          rm -rf .buildozer bin signed
+
+          find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+
+          find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+
+      - name: Force Java 17
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          JAVA_BIN="$(
+            find /usr/lib/jvm -type f -path '*/bin/java' -print 2>/dev/null |
+              grep '/java-17-' |
+              head -n 1
+          )"
+
+          JAVAC_BIN="$(
+            find /usr/lib/jvm -type f -path '*/bin/javac' -print 2>/dev/null |
+              grep '/java-17-' |
+              head -n 1
+          )"
+
+          test -n "$JAVA_BIN"
+          test -n "$JAVAC_BIN"
+
+          JAVA_HOME="$(dirname "$(dirname "$JAVA_BIN")")"
+
+          export JAVA_HOME
+          export PATH="$JAVA_HOME/bin:$PATH"
+
+          JAVA_VERSION="$(java -version 2>&1 | head -n 1)"
+          JAVAC_VERSION="$(javac -version 2>&1 | head -n 1)"
+
+          echo "$JAVA_VERSION"
+          echo "$JAVAC_VERSION"
+
+          case "$JAVA_VERSION" in
+            *'"17.'*)
+              ;;
+            *)
+              echo "ERROR: Java 17 was not selected."
+              exit 1
+              ;;
+          esac
+
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "PATH=$JAVA_HOME/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Build Android APK
         shell: bash
         run: |
-          set +e
+          set -o pipefail
+
           cd "$GITHUB_WORKSPACE"
-          export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          rm -rf .buildozer bin
+
+          echo "JAVA_HOME=$JAVA_HOME"
+
           java -version
           javac -version
+
           buildozer -v android debug 2>&1 | tee build.log
-          STATUS=${PIPESTATUS[0]}
-          exit "$STATUS"
+
+      - name: Locate Android signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APKSIGNER="$(
+            find "$HOME/.buildozer" -type f -name apksigner -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
+          )"
+
+          ZIPALIGN="$(
+            find "$HOME/.buildozer" -type f -name zipalign -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
+          )"
+
+          AAPT="$(
+            find "$HOME/.buildozer" -type f -name aapt -perm -111 \
+              -print 2>/dev/null | sort -V | tail -n 1
+          )"
+
+          test -n "$APKSIGNER"
+          test -n "$ZIPALIGN"
+          test -n "$AAPT"
+
+          test -x "$APKSIGNER"
+          test -x "$ZIPALIGN"
+          test -x "$AAPT"
+
+          echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
+          echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
+          echo "AAPT=$AAPT" >> "$GITHUB_ENV"
+
+          echo "apksigner: $APKSIGNER"
+          echo "zipalign:  $ZIPALIGN"
+          echo "aapt:      $AAPT"
+
+          "$APKSIGNER" version
+          "$AAPT" version
+
+      - name: Verify build APK package and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          APK="$(
+            find bin -type f -name '*.apk' -print |
+              sort |
+              head -n 1
+          )"
+
+          test -n "$APK"
+
+          echo "Build APK: $APK"
+          ls -lh "$APK"
+
+          BADGING="$("$AAPT" dump badging "$APK")"
+
+          printf '%s\n' "$BADGING" | sed -n '1,5p'
+
+          printf '%s\n' "$BADGING" |
+            grep -q "package: name='org.selflearningtrader.hundred'"
+
+          VERSION_NAME="$(
+            printf '%s\n' "$BADGING" |
+              sed -n "s/.*versionName='\([^']*\)'.*/\1/p" |
+              head -n 1
+          )"
+
+          VERSION_CODE="$(
+            printf '%s\n' "$BADGING" |
+              sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" |
+              head -n 1
+          )"
+
+          test -n "$VERSION_NAME"
+          test -n "$VERSION_CODE"
+
+          echo "APK versionName: $VERSION_NAME"
+          echo "APK versionCode: $VERSION_CODE"
+
+      - name: Align and sign APK with project key
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          APK="$(
+            find bin -type f -name '*.apk' -print |
+              sort |
+              head -n 1
+          )"
+
+          test -n "$APK"
+
+          rm -rf signed
+          mkdir -p signed
+
+          echo "Aligning APK..."
+
+          "$ZIPALIGN" -f -p 4 \
+            "$APK" \
+            signed/aligned.apk
+
+          echo "Signing APK..."
+
+          "$APKSIGNER" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out signed/final.apk \
+            signed/aligned.apk
+
+          echo "Verifying signature immediately after signing..."
+
+          "$APKSIGNER" verify \
+            --verbose \
+            --print-certs \
+            signed/final.apk
+
+          rm -f bin/*.apk
+
+          cp signed/final.apk bin/final.apk
+
+      - name: Verify final APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+
+          APK="$GITHUB_WORKSPACE/bin/final.apk"
+
+          test -f "$APK"
+
+          echo "=== FINAL APK ==="
+          ls -lh "$APK"
+
+          "$APKSIGNER" verify \
+            --verbose \
+            --print-certs \
+            "$APK" | tee apk-cert.txt
+
+          grep -q "Verified using v1 scheme (JAR signing): true" apk-cert.txt
+          grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" apk-cert.txt
+          grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" apk-cert.txt
+
+          KEY_SHA="$(
+            keytool -list -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey |
+              awk -F': ' '/SHA256:/{print $2; exit}'
+          )"
+
+          APK_SHA="$(
+            awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' apk-cert.txt
+          )"
+
+          KEY_SHA="$(echo "$KEY_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          APK_SHA="$(echo "$APK_SHA" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+
+          test -n "$KEY_SHA"
+          test -n "$APK_SHA"
+
+          echo "Keystore SHA-256: $KEY_SHA"
+          echo "APK SHA-256:      $APK_SHA"
+
+          test "$KEY_SHA" = "$APK_SHA"
+
+          echo "Checking ZIP alignment..."
+
+          "$ZIPALIGN" -c -P 4 -v 4 "$APK"
+
+          FINAL_BADGING="$("$AAPT" dump badging "$APK")"
+
+          printf '%s\n' "$FINAL_BADGING" |
+            grep -q "package: name='org.selflearningtrader.hundred'"
+
+          echo "FINAL APK VERIFICATION PASSED."
 
       - name: Upload build log
         if: always()
@@ -109,10 +419,10 @@ jobs:
           path: build.log
           if-no-files-found: warn
 
-      - name: Upload APK
+      - name: Upload final verified APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SelfLearningTrader-HUNDRED-debug-apk
-          path: bin/*.apk
+          name: SelfLearningTrader-HUNDRED-verified-apk
+          path: bin/final.apk
           if-no-files-found: error
