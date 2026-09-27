@@ -2,14 +2,12 @@ name: Install and Build HUNDRED
 
 on:
   workflow_dispatch:
-
   push:
     paths:
-      - "SelfLearningTrader_HUNDRED_*.zip"
-      - "**/SelfLearningTrader_HUNDRED_*.zip"
+      - 'SelfLearningTrader_HUNDRED_*.zip'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   install-and-build:
@@ -17,663 +15,104 @@ jobs:
     timeout-minutes: 120
 
     steps:
-
-      # ============================================================
-      # CHECKOUT
-      # ============================================================
-
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-
-      # ============================================================
-      # JAVA 17
-      # ============================================================
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
-
-
-      # ============================================================
-      # FIND ANY HUNDRED ZIP
-      # ============================================================
 
       - name: Select and extract HUNDRED ZIP
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "Searching for SelfLearningTrader_HUNDRED_*.zip..."
-
-          find "$GITHUB_WORKSPACE" \
-            -type f \
-            -name 'SelfLearningTrader_HUNDRED_*.zip' \
-            -not -path "$GITHUB_WORKSPACE/.git/*" \
-            -printf '%T@ %p\n' |
-          sort -nr |
-          sed 's/^[^ ]* //' > /tmp/hundred_zips.txt
-
-          if [ ! -s /tmp/hundred_zips.txt ]; then
-            echo "ERROR: No SelfLearningTrader_HUNDRED_*.zip found."
-            exit 1
-          fi
-
-          read -r ZIP < /tmp/hundred_zips.txt
-
-          echo
-          echo "========================================"
-          echo "SELECTED HUNDRED ZIP"
-          echo "========================================"
-          echo "$ZIP"
-          echo
-
-          sha256sum "$ZIP"
-
-          echo
-          echo "Testing ZIP..."
-
+          mapfile -t ZIPS < <(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'SelfLearningTrader_HUNDRED_*.zip' -print | sort -V)
+          test "${#ZIPS[@]}" -gt 0
+          ZIP="${ZIPS[${#ZIPS[@]}-1]}"
+          echo "Selected ZIP: $ZIP"
           unzip -q -t "$ZIP"
 
-          echo "ZIP test PASSED."
+          # IMPORTANT: extract outside the repository.
+          # The previous workflow extracted inside the repository and then rsync --delete
+          # deleted files from its own source, causing rsync error 24.
+          rm -rf /tmp/hundred_project
+          mkdir -p /tmp/hundred_project
+          unzip -q -o "$ZIP" -d /tmp/hundred_project
 
-          INSTALL_ROOT="/tmp/hundred_project"
-
-          rm -rf "$INSTALL_ROOT"
-          mkdir -p "$INSTALL_ROOT"
-
-          unzip -q -o "$ZIP" -d "$INSTALL_ROOT"
-
-          ROOT="$INSTALL_ROOT"
-
-          find "$INSTALL_ROOT" \
-            -mindepth 1 \
-            -maxdepth 1 \
-            -type d \
-            -print > /tmp/hundred_top_dirs.txt
-
-          TOP_COUNT="$(wc -l < /tmp/hundred_top_dirs.txt)"
-
-          if [ "$TOP_COUNT" = "1" ]; then
-            read -r POSSIBLE_ROOT < /tmp/hundred_top_dirs.txt
-
-            if [ -f "$POSSIBLE_ROOT/buildozer.spec" ]; then
-              ROOT="$POSSIBLE_ROOT"
-            fi
+          mapfile -t TOP < <(find /tmp/hundred_project -mindepth 1 -maxdepth 1 -print)
+          if [ "${#TOP[@]}" -eq 1 ] && [ -d "${TOP[0]}" ]; then
+            ROOT="${TOP[0]}"
+          else
+            ROOT="/tmp/hundred_project"
           fi
+          echo "Extracted project root: $ROOT"
 
-          echo
-          echo "Project root:"
-          echo "$ROOT"
+          # Copy the project into the runner workspace, but preserve the current
+          # bootstrap workflow. No git push is performed by this workflow.
+          rsync -a --delete --exclude='.git/' --exclude='.github/' "$ROOT"/ "$GITHUB_WORKSPACE"/
 
-          rsync -a --delete \
-            --exclude='.git/' \
-            --exclude='.github/' \
-            "$ROOT"/ "$GITHUB_WORKSPACE"/
-
-          rm -rf "$INSTALL_ROOT"
-
-          cd "$GITHUB_WORKSPACE"
-
-          test -f buildozer.spec
-          test -f requirements.txt
-          test -f app/main.py
-          test -f signing/debug.keystore
-
-          echo
-          echo "========================================"
-          echo "INSTALLED PROJECT"
-          echo "========================================"
-
-          grep -E \
-            '^[[:space:]]*(package.name|package.domain|version|android.numeric_version)[[:space:]]*=' \
-            buildozer.spec || true
-
-
-      # ============================================================
-      # SYSTEM DEPENDENCIES
-      # ============================================================
+          test -f "$GITHUB_WORKSPACE/buildozer.spec"
+          test -f "$GITHUB_WORKSPACE/requirements.txt"
+          test -f "$GITHUB_WORKSPACE/app/main.py"
+          test -f "$GITHUB_WORKSPACE/p4a-recipes/kivy/__init__.py"
 
       - name: Install Android build dependencies
         shell: bash
         run: |
           set -euo pipefail
-
           sudo apt-get update
-
           sudo apt-get install -y \
-            ant \
-            autoconf \
-            automake \
-            autopoint \
-            ccache \
-            cmake \
-            g++ \
-            gcc \
-            gettext \
-            git \
-            lbzip2 \
-            libffi-dev \
-            libltdl-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            libssl-dev \
-            libtool \
-            make \
-            openjdk-17-jdk \
-            patch \
-            pkg-config \
-            python3 \
-            python3-dev \
-            python3-pip \
-            python3-venv \
-            rsync \
-            unzip \
-            wget \
-            zip \
-            zlib1g-dev
-
+            ant autoconf automake autopoint ccache cmake \
+            g++ gcc gettext git lbzip2 \
+            libffi-dev libltdl-dev libncurses5-dev libncursesw5-dev \
+            libssl-dev libtool make openjdk-17-jdk patch pkg-config \
+            python3 python3-dev python3-pip python3-venv rsync \
+            unzip wget zip zlib1g-dev
           python3 -m pip install --upgrade pip
+          python3 -m pip install 'cython==3.0.12' buildozer==1.5.0
 
-          python3 -m pip install \
-            "cython==3.0.12" \
-            "buildozer==1.5.0"
-
-
-      # ============================================================
-      # FORCE JAVA 17
-      # ============================================================
-
-      - name: Force Java 17
+      - name: Verify project before build
         shell: bash
         run: |
           set -euo pipefail
-
-          JAVA17=""
-
-          for J in \
-            "/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17"/*/x64 \
-            "/usr/lib/jvm/temurin-17-jdk-amd64" \
-            "/usr/lib/jvm/java-17-openjdk-amd64"
-          do
-            if [ -x "$J/bin/java" ]; then
-              JAVA17="$J"
-              break
-            fi
-          done
-
-          if [ -z "$JAVA17" ]; then
-            echo "ERROR: Java 17 installation not found."
-            exit 1
-          fi
-
-          echo "JAVA_HOME=$JAVA17" >> "$GITHUB_ENV"
-          echo "$JAVA17/bin" >> "$GITHUB_PATH"
-
-          export JAVA_HOME="$JAVA17"
-          export PATH="$JAVA_HOME/bin:$PATH"
-
-          echo
-          echo "========================================"
-          echo "JAVA 17"
-          echo "========================================"
-
-          java -version
-          javac -version
-
-          JAVA_VERSION="$(java -version 2>&1 | head -n 1)"
-
-          echo
-          echo "Detected:"
-          echo "$JAVA_VERSION"
-
-          case "$JAVA_VERSION" in
-            *'"17.'*)
-              echo
-              echo "Java 17 verification PASSED."
-              ;;
-            *)
-              echo
-              echo "ERROR: Java 17 is required."
-              exit 1
-              ;;
-          esac
-
-
-      # ============================================================
-      # VERIFY PROJECT AND SIGNING KEY
-      # ============================================================
-
-      - name: Verify installed project and signing key
-        shell: bash
-        run: |
-          set -euo pipefail
-
           cd "$GITHUB_WORKSPACE"
-
-          test -f buildozer.spec
-          test -f requirements.txt
+          echo '=== buildozer.spec ==='
+          cat buildozer.spec
+          echo '=== requirements.txt ==='
+          cat requirements.txt
+          echo '=== required files ==='
           test -f app/main.py
-          test -f signing/debug.keystore
-
-          echo
-          echo "========================================"
-          echo "PROJECT INFORMATION"
-          echo "========================================"
-
-          sed -n \
-            's/^[[:space:]]*package.domain[[:space:]]*=[[:space:]]*//p' \
-            buildozer.spec |
-          tail -n 1 |
-          xargs > /tmp/package_domain.txt
-
-          sed -n \
-            's/^[[:space:]]*package.name[[:space:]]*=[[:space:]]*//p' \
-            buildozer.spec |
-          tail -n 1 |
-          xargs > /tmp/package_name.txt
-
-          sed -n \
-            's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
-            buildozer.spec |
-          tail -n 1 |
-          xargs > /tmp/project_version.txt
-
-          sed -n \
-            's/^[[:space:]]*android.numeric_version[[:space:]]*=[[:space:]]*//p' \
-            buildozer.spec |
-          tail -n 1 |
-          xargs > /tmp/project_version_code.txt
-
-          read -r PACKAGE_DOMAIN < /tmp/package_domain.txt
-          read -r PACKAGE_NAME < /tmp/package_name.txt
-          read -r VERSION < /tmp/project_version.txt
-          read -r VERSION_CODE < /tmp/project_version_code.txt
-
-          PACKAGE_ID="${PACKAGE_DOMAIN}.${PACKAGE_NAME}"
-
-          echo "Package ID   : $PACKAGE_ID"
-          echo "Version      : $VERSION"
-          echo "Version code : $VERSION_CODE"
-
-          if [ "$PACKAGE_ID" != "org.selflearningtrader.hundred" ]; then
-            echo "ERROR: Wrong package ID."
-            exit 1
-          fi
-
-          echo "HUNDRED_PACKAGE_ID=$PACKAGE_ID" >> "$GITHUB_ENV"
-          echo "HUNDRED_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "HUNDRED_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
-
-          echo
-          echo "Python syntax check..."
-
+          test -f p4a-recipes/kivy/__init__.py
+          grep -q '^p4a.local_recipes = p4a-recipes$' buildozer.spec
+          grep -q '^p4a.branch = v2026.05.09$' buildozer.spec
+          grep -q '^requirements = python3,kivy==2.3.1,numpy,certifi$' buildozer.spec
+          ! grep -RniE 'requests|charset[-_]normalizer|urllib3|pandas|scikit-learn|joblib' buildozer.spec requirements.txt app
+          test "$(python3 -c 'import Cython; print(Cython.__version__)')" = '3.0.12'
           python3 -m compileall -q app
-
-          echo "Python syntax check PASSED."
-
-          echo
-          echo "========================================"
-          echo "SIGNING KEY"
-          echo "========================================"
-
-          mkdir -p "$HOME/.android"
-
-          cp \
-            signing/debug.keystore \
-            "$HOME/.android/debug.keystore"
-
-          chmod 600 \
-            "$HOME/.android/debug.keystore"
-
-          keytool -list \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey > /tmp/key_list.txt
-
-          keytool -list -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey > /tmp/key_details.txt
-
-          awk -F': ' \
-            '/SHA256:/{print $2; exit}' \
-            /tmp/key_details.txt |
-          tr -d ':[:space:]' |
-          tr '[:lower:]' '[:upper:]' \
-            > /tmp/hundred_key_sha.txt
-
-          if [ ! -s /tmp/hundred_key_sha.txt ]; then
-            echo "ERROR: Could not read signing key SHA-256."
-            exit 1
-          fi
-
-          read -r KEY_SHA < /tmp/hundred_key_sha.txt
-
-          echo "Signing key SHA-256:"
-          echo "$KEY_SHA"
-
-          cp \
-            /tmp/hundred_key_sha.txt \
-            "$GITHUB_WORKSPACE/hundred_key_sha.txt"
-
-          echo
-          echo "Signing key verification PASSED."
-
-
-      # ============================================================
-      # CLEAN BUILD STATE
-      # ============================================================
-
-      - name: Clean Android build state
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$GITHUB_WORKSPACE"
-
-          rm -rf \
-            .buildozer \
-            bin \
-            signed
-
-          find . \
-            -type d \
-            -name '__pycache__' \
-            -prune \
-            -exec rm -rf {} +
-
-          find . \
-            -type f \
-            -name '*.pyc' -o -name '*.pyo' \
-            -delete
-
-          echo "Android build state cleaned."
-
-
-      # ============================================================
-      # VERIFY JAVA BEFORE BUILD
-      # ============================================================
-
-      - name: Verify Java before Android build
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          export JAVA_HOME="$JAVA_HOME"
-          export PATH="$JAVA_HOME/bin:$PATH"
-
-          echo
-          echo "========================================"
-          echo "JAVA BEFORE BUILD"
-          echo "========================================"
-
-          java -version
-          javac -version
-
-          JAVA_VERSION="$(java -version 2>&1 | head -n 1)"
-
-          echo
-          echo "Detected:"
-          echo "$JAVA_VERSION"
-
-          case "$JAVA_VERSION" in
-            *'"17.'*)
-              echo
-              echo "Java 17 confirmed."
-              ;;
-            *)
-              echo
-              echo "ERROR: Java 17 is not active."
-              exit 1
-              ;;
-          esac
-
-
-      # ============================================================
-      # BUILD ANDROID APK
-      # ============================================================
+          echo '=== verification passed ==='
 
       - name: Build Android APK
         shell: bash
         run: |
-          set -euo pipefail
-
+          set +e
           cd "$GITHUB_WORKSPACE"
-
-          export JAVA_HOME="$JAVA_HOME"
+          export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
           export PATH="$JAVA_HOME/bin:$PATH"
-
-          echo
-          echo "========================================"
-          echo "ANDROID BUILD"
-          echo "========================================"
-
+          rm -rf .buildozer bin
           java -version
           javac -version
-
           buildozer -v android debug 2>&1 | tee build.log
+          STATUS=${PIPESTATUS[0]}
+          exit "$STATUS"
 
-          echo
-          echo "Buildozer completed."
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfLearningTrader-HUNDRED-build-log
+          path: build.log
+          if-no-files-found: warn
 
-          find bin \
-            -type f \
-            -name '*.apk' \
-            -print > /tmp/built_apks.txt
-
-          if [ ! -s /tmp/built_apks.txt ]; then
-            echo "ERROR: Buildozer completed but no APK was produced."
-            exit 1
-          fi
-
-          echo
-          echo "Produced APK:"
-          cat /tmp/built_apks.txt
-
-
-      # ============================================================
-      # LOCATE ANDROID TOOLS
-      # ============================================================
-
-      - name: Locate Android signing tools
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          find "$HOME/.buildozer" \
-            -type f \
-            -name apksigner \
-            -perm -111 \
-            -print 2>/dev/null |
-          sort -V |
-          tail -n 1 > /tmp/apksigner_path.txt
-
-          find "$HOME/.buildozer" \
-            -type f \
-            -name zipalign \
-            -perm -111 \
-            -print 2>/dev/null |
-          sort -V |
-          tail -n 1 > /tmp/zipalign_path.txt
-
-          find "$HOME/.buildozer" \
-            -type f \
-            -name aapt \
-            -perm -111 \
-            -print 2>/dev/null |
-          sort -V |
-          tail -n 1 > /tmp/aapt_path.txt
-
-          if [ ! -s /tmp/apksigner_path.txt ]; then
-            echo "ERROR: apksigner not found."
-            exit 1
-          fi
-
-          if [ ! -s /tmp/zipalign_path.txt ]; then
-            echo "ERROR: zipalign not found."
-            exit 1
-          fi
-
-          if [ ! -s /tmp/aapt_path.txt ]; then
-            echo "ERROR: aapt not found."
-            exit 1
-          fi
-
-          read -r APKSIGNER < /tmp/apksigner_path.txt
-          read -r ZIPALIGN < /tmp/zipalign_path.txt
-          read -r AAPT < /tmp/aapt_path.txt
-
-          echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
-          echo "ZIPALIGN=$ZIPALIGN" >> "$GITHUB_ENV"
-          echo "AAPT=$AAPT" >> "$GITHUB_ENV"
-
-          echo
-          echo "========================================"
-          echo "ANDROID TOOLS"
-          echo "========================================"
-
-          echo "apksigner:"
-          echo "$APKSIGNER"
-
-          echo
-          echo "zipalign:"
-          echo "$ZIPALIGN"
-
-          echo
-          echo "aapt:"
-          echo "$AAPT"
-
-          echo
-          echo "Checking apksigner..."
-          "$APKSIGNER" version
-
-          echo
-          echo "Checking aapt..."
-          "$AAPT" version
-
-          echo
-          echo "Android signing tools located successfully."
-
-
-      # ============================================================
-      # VERIFY BUILD APK
-      # ============================================================
-
-      - name: Verify build APK package and version
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$GITHUB_WORKSPACE"
-
-          read -r APK < /tmp/built_apks.txt
-
-          echo
-          echo "========================================"
-          echo "BUILD APK"
-          echo "========================================"
-
-          echo "$APK"
-
-          "$AAPT" dump badging "$APK" > /tmp/build_badging.txt
-
-          cat /tmp/build_badging.txt
-
-          python3 - <<'PY'
-          import os
-          import re
-          import sys
-
-          text = open(
-              "/tmp/build_badging.txt",
-              "r",
-              encoding="utf-8"
-          ).read()
-
-          match = re.search(
-              r"package:\s+name='([^']+)'.*?versionCode='([^']+)'.*?versionName='([^']+)'",
-              text
-          )
-
-          if not match:
-              print("ERROR: Could not parse APK package information.")
-              sys.exit(1)
-
-          package_id = match.group(1)
-          version_code = match.group(2)
-          version = match.group(3)
-
-          expected_package = os.environ["HUNDRED_PACKAGE_ID"]
-          expected_version = os.environ["HUNDRED_VERSION"]
-          expected_version_code = os.environ["HUNDRED_VERSION_CODE"]
-
-          print()
-          print("Detected package     :", package_id)
-          print("Detected version     :", version)
-          print("Detected versionCode :", version_code)
-
-          print()
-          print("Expected package     :", expected_package)
-          print("Expected version     :", expected_version)
-          print("Expected versionCode :", expected_version_code)
-
-          if package_id != expected_package:
-              print("ERROR: APK package mismatch.")
-              sys.exit(1)
-
-          if version != expected_version:
-              print("ERROR: APK version mismatch.")
-              sys.exit(1)
-
-          if version_code != expected_version_code:
-              print("ERROR: APK version code mismatch.")
-              sys.exit(1)
-
-          print()
-          print("APK package/version verification PASSED.")
-          PY
-
-
-      # ============================================================
-      # ALIGN APK
-      # ============================================================
-
-      - name: Align APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$GITHUB_WORKSPACE"
-
-          read -r APK < /tmp/built_apks.txt
-
-          rm -rf signed
-          mkdir -p signed
-
-          echo
-          echo "========================================"
-          echo "ALIGNING APK"
-          echo "========================================"
-
-          "$ZIPALIGN" \
-            -f \
-            -p \
-            4 \
-            "$APK" \
-            signed/aligned.apk
-
-          test -f signed/aligned.apk
-
-          echo
-          echo "Checking alignment..."
-
-          "$ZIPALIGN" \
-            -c \
-            -v \
-            4 \
-           
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfLearningTrader-HUNDRED-debug-apk
+          path: bin/*.apk
+          if-no-files-found: error
