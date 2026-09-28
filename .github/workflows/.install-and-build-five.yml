@@ -306,7 +306,7 @@ jobs:
           echo "AAPT=$AAPT" >> "$GITHUB_ENV"
 
           "$APKSIGNER" version
-          test -x "$ZIPALIGN"
+          "$ZIPALIGN" -h >/dev/null 2>&1 || true
           "$AAPT" version
 
       - name: Verify build APK package and version
@@ -327,24 +327,20 @@ jobs:
 
           echo "Build APK: $APK"
 
-          BADGING="$(
-            "$AAPT" dump badging "$APK"
-          )"
+          BADGING="$("$AAPT" dump badging "$APK")"
+
+          printf '%s\n' "$BADGING" | sed -n '1,5p'
 
           printf '%s\n' "$BADGING" |
-            sed -n '1,5p'
+            grep -Fq "package: name='${FIVE_PACKAGE_ID}'"
 
           printf '%s\n' "$BADGING" |
-            grep -q \
-            "package: name='${FIVE_PACKAGE_ID}'"
+            grep -Fq "versionCode='${FIVE_VERSION_CODE}'"
 
           printf '%s\n' "$BADGING" |
-            grep -q \
-            "versionCode='${FIVE_VERSION_CODE}'"
+            grep -Fq "versionName='${FIVE_VERSION}'"
 
-          printf '%s\n' "$BADGING" |
-            grep -q \
-            "versionName='${FIVE_VERSION}'"
+          echo "Build APK package and version verification passed."
 
       - name: Align and sign APK with fixed FIVE key
         shell: bash
@@ -390,7 +386,9 @@ jobs:
 
           rm -f bin/*.apk
 
-          cp signed/final.apk bin/
+          cp signed/final.apk bin/final.apk
+
+          echo "APK signing completed."
 
       - name: Verify final APK identity, alignment and certificate
         shell: bash
@@ -399,14 +397,9 @@ jobs:
 
           cd "$GITHUB_WORKSPACE"
 
-          APK="$(
-            find bin \
-              -type f \
-              -name '*.apk' \
-              -print -quit
-          )"
+          APK="bin/final.apk"
 
-          test -n "$APK"
+          test -f "$APK"
 
           FAIL=0
 
@@ -415,13 +408,241 @@ jobs:
 
           echo "=== APK SIGNATURE VERIFICATION ==="
 
-          if "$APKSIGNER" verify \
+          set +e
+          "$APKSIGNER" verify \
             --verbose \
             --print-certs \
-            "$APK" > apk-cert.txt 2>&1; then
+            "$APK" > apk-cert.txt 2>&1
+          APKSIGNER_STATUS=$?
+          set -e
 
-            cat apk-cert.txt
+          cat apk-cert.txt
 
+          if [ "$APKSIGNER_STATUS" -ne 0 ]; then
+            echo "::error::APKSIGNER_VERIFY_FAILED"
+            FAIL=1
+          fi
+
+          echo "=== CHECK V1 ==="
+
+          V1_LINE="$(
+            grep -F \
+              "Verified using v1 scheme (JAR signing):" \
+              apk-cert.txt |
+              head -n 1 || true
+          )"
+
+          echo "Actual V1 result: ${V1_LINE:-NOT FOUND}"
+
+          if printf '%s\n' "$V1_LINE" |
+            grep -Fq ": true"; then
+            echo "OK: v1 signing = true"
           else
+            echo "::warning::V1_SIGNING_CHECK_FAILED"
+            echo "V1 is not verified."
+          fi
 
-            echo "::error::APKSIGNER_VERIFY_FAILED
+          echo "=== CHECK V2 ==="
+
+          V2_LINE="$(
+            grep -F \
+              "Verified using v2 scheme (APK Signature Scheme v2):" \
+              apk-cert.txt |
+              head -n 1 || true
+          )"
+
+          echo "Actual V2 result: ${V2_LINE:-NOT FOUND}"
+
+          if printf '%s\n' "$V2_LINE" |
+            grep -Fq ": true"; then
+            echo "OK: v2 signing = true"
+          else
+            echo "::error::V2_SIGNING_CHECK_FAILED"
+            FAIL=1
+          fi
+
+          echo "=== CHECK V3 ==="
+
+          V3_LINE="$(
+            grep -F \
+              "Verified using v3 scheme (APK Signature Scheme v3):" \
+              apk-cert.txt |
+              head -n 1 || true
+          )"
+
+          echo "Actual V3 result: ${V3_LINE:-NOT FOUND}"
+
+          if printf '%s\n' "$V3_LINE" |
+            grep -Fq ": true"; then
+            echo "OK: v3 signing = true"
+          else
+            echo "::error::V3_SIGNING_CHECK_FAILED"
+            FAIL=1
+          fi
+
+          echo "=== CHECK SIGNING KEY SHA-256 ==="
+
+          KEY_SHA="$(
+            keytool -list -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey |
+              awk -F': ' '/SHA256:/{print $2; exit}'
+          )"
+
+          if [ -z "$KEY_SHA" ]; then
+            echo "::error::KEY_SHA_EXTRACTION_FAILED"
+            FAIL=1
+          else
+            KEY_SHA="$(
+              echo "$KEY_SHA" |
+              tr -d '[:space:]:' |
+              tr '[:lower:]' '[:upper:]'
+            )"
+
+            echo "Expected signing certificate SHA-256:"
+            echo "$KEY_SHA"
+          fi
+
+          echo "=== CHECK APK CERTIFICATE SHA-256 ==="
+
+          APK_SHA="$(
+            awk '
+              /certificate SHA-256 digest:/ {
+                capture=1
+                sub(/^.*certificate SHA-256 digest:[[:space:]]*/, "")
+                gsub(/[[:space:]]/, "")
+                value=value $0
+                next
+              }
+
+              capture && /certificate SHA-1 digest:/ {
+                print value
+                exit
+              }
+
+              capture {
+                gsub(/[[:space:]]/, "")
+                value=value $0
+              }
+            ' apk-cert.txt
+          )"
+
+          if [ -z "$APK_SHA" ]; then
+            echo "::error::APK_CERTIFICATE_SHA256_EXTRACTION_FAILED"
+            echo "Could not extract certificate SHA-256."
+            grep -A 8 -B 2 \
+              "certificate SHA-256 digest:" \
+              apk-cert.txt || true
+            FAIL=1
+          else
+            APK_SHA="$(
+              echo "$APK_SHA" |
+              tr -d '[:space:]:' |
+              tr '[:lower:]' '[:upper:]'
+            )"
+
+            echo "Actual APK certificate SHA-256:"
+            echo "$APK_SHA"
+          fi
+
+          if [ -n "${KEY_SHA:-}" ] &&
+             [ -n "${APK_SHA:-}" ]; then
+
+            echo "=== COMPARE CERTIFICATE SHA-256 ==="
+
+            if [ "$KEY_SHA" = "$APK_SHA" ]; then
+              echo "OK: certificate SHA-256 matches fixed signing key."
+            else
+              echo "::error::CERTIFICATE_SHA256_MISMATCH"
+              echo "Expected: $KEY_SHA"
+              echo "Actual:   $APK_SHA"
+              FAIL=1
+            fi
+          fi
+
+          echo "=== CHECK APK ALIGNMENT ==="
+
+          if "$ZIPALIGN" \
+            -c \
+            -P 4 \
+            -v 4 \
+            "$APK"; then
+            echo "OK: APK alignment check passed."
+          else
+            echo "::error::ZIPALIGN_CHECK_FAILED"
+            FAIL=1
+          fi
+
+          echo "=== CHECK APK BADGING ==="
+
+          FINAL_BADGING="$("$AAPT" dump badging "$APK")"
+
+          printf '%s\n' "$FINAL_BADGING" |
+            sed -n '1,5p'
+
+          PACKAGE_LINE="$(
+            printf '%s\n' "$FINAL_BADGING" |
+            grep -F "package:" |
+            head -n 1 || true
+          )"
+
+          echo "Actual package line: ${PACKAGE_LINE:-NOT FOUND}"
+
+          echo "=== CHECK PACKAGE ID ==="
+
+          if printf '%s\n' "$PACKAGE_LINE" |
+            grep -Fq "name='${FIVE_PACKAGE_ID}'"; then
+            echo "OK: package ID = $FIVE_PACKAGE_ID"
+          else
+            echo "::error::PACKAGE_ID_CHECK_FAILED"
+            echo "Expected: $FIVE_PACKAGE_ID"
+            FAIL=1
+          fi
+
+          echo "=== CHECK VERSION CODE ==="
+
+          if printf '%s\n' "$PACKAGE_LINE" |
+            grep -Fq "versionCode='${FIVE_VERSION_CODE}'"; then
+            echo "OK: versionCode = $FIVE_VERSION_CODE"
+          else
+            echo "::error::VERSION_CODE_CHECK_FAILED"
+            echo "Expected: $FIVE_VERSION_CODE"
+            FAIL=1
+          fi
+
+          echo "=== CHECK VERSION NAME ==="
+
+          if printf '%s\n' "$PACKAGE_LINE" |
+            grep -Fq "versionName='${FIVE_VERSION}'"; then
+            echo "OK: versionName = $FIVE_VERSION"
+          else
+            echo "::error::VERSION_NAME_CHECK_FAILED"
+            echo "Expected: $FIVE_VERSION"
+            FAIL=1
+          fi
+
+          echo "========================================"
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "::error::FINAL APK VERIFICATION FAILED."
+            exit 1
+          fi
+
+          echo "FINAL APK VERIFICATION PASSED."
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfLearningTrader-FIVE-build-log
+          path: build.log
+          if-no-files-found: warn
+
+      - name: Upload final verified APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SelfLearningTrader-FIVE-verified-apk
+          path: bin/final.apk
+          if-no-files-found: error
